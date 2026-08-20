@@ -204,7 +204,7 @@ public sealed class BraviaEngine : IDisposable
                     {
                         var (path, value) = cmd;
 
-                        // Coalesce rapid volume updates to prevent network lag
+                        // Coalesce rapid volume updates to the latest one
                         if (path == "volume")
                         {
                             while (_cmdChannel.Reader.TryPeek(out var next) && next.path == "volume")
@@ -245,7 +245,7 @@ public sealed class BraviaEngine : IDisposable
             catch (Exception ex)
             {
                 Log($"Command drain error: {ex.Message}");
-                await Task.Delay(100, ct);
+                await Task.Delay(50, ct);
             }
         }
     }
@@ -256,7 +256,7 @@ public sealed class BraviaEngine : IDisposable
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(20), ct);
+                await Task.Delay(TimeSpan.FromSeconds(25), ct);
                 if (_client == null || ct.IsCancellationRequested) break;
 
                 var snapshot = await _client.GetInitialStatesAsync(new[] { "power", "volume", "playback_control.audio_format" }, ct);
@@ -282,29 +282,45 @@ public sealed class BraviaEngine : IDisposable
             string? channel = _currentState.Channel;
 
             if (snapshot.TryGetValue("power", out var pObj) && pObj != null)
-                power = pObj.ToString() == "on" || pObj.ToString() == "active" || pObj.ToString() == "1" || pObj.ToString() == "True";
+                power = pObj.ToString() == "on" || pObj.ToString() == "active" || pObj.ToString() == "1" || pObj.ToString() == "True" || (pObj is bool pb && pb);
 
             if (snapshot.TryGetValue("volume", out var vObj) && vObj != null && int.TryParse(vObj.ToString(), out int v))
                 vol = v;
 
             if (snapshot.TryGetValue("mute", out var mObj) && mObj != null)
-                mute = mObj.ToString() == "on" || mObj.ToString() == "1" || mObj.ToString() == "true" || mObj.ToString() == "True";
+                mute = mObj.ToString() == "on" || mObj.ToString() == "1" || mObj.ToString() == "true" || mObj.ToString() == "True" || (mObj is bool mb && mb);
 
             if (snapshot.TryGetValue("sound_setting.night_mode", out var nmObj) && nmObj != null)
-                nightMode = nmObj.ToString() == "on" || nmObj.ToString() == "1" || nmObj.ToString() == "true" || nmObj.ToString() == "True";
+                nightMode = nmObj.ToString() == "on" || nmObj.ToString() == "1" || nmObj.ToString() == "true" || nmObj.ToString() == "True" || (nmObj is bool nmb && nmb);
 
             if (snapshot.TryGetValue("sound_setting.sound_field", out var sfObj) && sfObj != null)
-                soundField = sfObj.ToString() == "on" || sfObj.ToString() == "1" || sfObj.ToString() == "true" || sfObj.ToString() == "True";
+                soundField = sfObj.ToString() == "on" || sfObj.ToString() == "1" || sfObj.ToString() == "true" || sfObj.ToString() == "True" || (sfObj is bool sfb && sfb);
 
             if (snapshot.TryGetValue("audio_output.stream_info.audio_format", out var cObj) && cObj != null)
-                codec = cObj.ToString();
+            {
+                var format = cObj.ToString();
+                if (!string.IsNullOrEmpty(format) && format != "unknown" && format != "none" && format != "NoAudio")
+                    codec = format;
+            }
             else if (snapshot.TryGetValue("playback_control.audio_format", out var pcObj) && pcObj != null)
-                codec = pcObj.ToString();
+            {
+                var format = pcObj.ToString();
+                if (!string.IsNullOrEmpty(format) && format != "unknown" && format != "none" && format != "NoAudio")
+                    codec = format;
+            }
 
             if (snapshot.TryGetValue("audio_output.stream_info.channel_info", out var chObj) && chObj != null)
-                channel = chObj.ToString();
+            {
+                var ch = chObj.ToString();
+                if (!string.IsNullOrEmpty(ch) && ch != "unknown" && ch != "none")
+                    channel = ch;
+            }
             else if (snapshot.TryGetValue("playback_control.audio_channel", out var pchObj) && pchObj != null)
-                channel = pchObj.ToString();
+            {
+                var ch = pchObj.ToString();
+                if (!string.IsNullOrEmpty(ch) && ch != "unknown" && ch != "none")
+                    channel = ch;
+            }
 
             CurrentState = new SoundbarState
             {
@@ -334,39 +350,47 @@ public sealed class BraviaEngine : IDisposable
                 cur = cur with { Volume = v };
                 updated = true;
             }
-            else if (path == "power")
+            else if (path == "power" || path == "playback_control.power")
             {
-                bool p = value.ToString() == "on" || value.ToString() == "active" || value.ToString() == "1" || value.ToString() == "True";
+                bool p = value.ToString() == "on" || value.ToString() == "active" || value.ToString() == "1" || value.ToString() == "True" || (value is bool b && b);
                 cur = cur with { Power = p };
                 updated = true;
             }
             else if (path == "mute")
             {
-                bool m = value.ToString() == "on" || value.ToString() == "1" || value.ToString() == "true" || value.ToString() == "True";
+                bool m = value.ToString() == "on" || value.ToString() == "1" || value.ToString() == "true" || value.ToString() == "True" || (value is bool b && b);
                 cur = cur with { Mute = m };
                 updated = true;
             }
-            else if (path.Contains("night_mode"))
+            else if (path == "sound_setting.night_mode")
             {
-                bool nm = value.ToString() == "on" || value.ToString() == "1" || value.ToString() == "true" || value.ToString() == "True";
+                bool nm = value.ToString() == "on" || value.ToString() == "1" || value.ToString() == "true" || value.ToString() == "True" || (value is bool b && b);
                 cur = cur with { NightMode = nm };
                 updated = true;
             }
-            else if (path.Contains("sound_field"))
+            else if (path == "sound_setting.sound_field")
             {
-                bool sf = value.ToString() == "on" || value.ToString() == "1" || value.ToString() == "true" || value.ToString() == "True";
+                bool sf = value.ToString() == "on" || value.ToString() == "1" || value.ToString() == "true" || value.ToString() == "True" || (value is bool b && b);
                 cur = cur with { SoundField = sf };
                 updated = true;
             }
-            else if (path.Contains("audio_format"))
+            else if (path == "playback_control.audio_format" || path == "audio_output.stream_info.audio_format")
             {
-                cur = cur with { Codec = value.ToString() ?? cur.Codec };
-                updated = true;
+                var format = value.ToString();
+                if (!string.IsNullOrEmpty(format) && format != "unknown" && format != "none" && format != "NoAudio")
+                {
+                    cur = cur with { Codec = format };
+                    updated = true;
+                }
             }
-            else if (path.Contains("channel_info") || path.Contains("audio_channel"))
+            else if (path == "playback_control.audio_channel" || path == "audio_output.stream_info.channel_info")
             {
-                cur = cur with { Channel = value.ToString() ?? cur.Channel };
-                updated = true;
+                var ch = value.ToString();
+                if (!string.IsNullOrEmpty(ch) && ch != "unknown" && ch != "none")
+                {
+                    cur = cur with { Channel = ch };
+                    updated = true;
+                }
             }
 
             if (updated)

@@ -11,23 +11,25 @@
         ResizeMode="NoResize">
 
     <Window.Resources>
-        <!-- Fluent Slider Style -->
+        <!-- Windows 11 Sleek Fluent Sound Slider Style -->
         <Style x:Key="FluentSlider" TargetType="Slider">
             <Setter Property="Minimum" Value="0"/>
             <Setter Property="Maximum" Value="100"/>
             <Setter Property="IsSnapToTickEnabled" Value="True"/>
             <Setter Property="TickFrequency" Value="1"/>
+            <Setter Property="IsMoveToPointEnabled" Value="True"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Slider">
-                        <Grid VerticalAlignment="Center">
+                        <Grid VerticalAlignment="Center" Height="22">
                             <Track x:Name="PART_Track">
                                 <Track.DecreaseRepeatButton>
                                     <RepeatButton Command="Slider.DecreaseLarge">
                                         <RepeatButton.Template>
                                             <ControlTemplate>
-                                                <Border Height="6" CornerRadius="3" Background="#0078D7"/>
+                                                <Border Height="6" CornerRadius="3,0,0,3" Background="#4CC2FF"/>
                                             </ControlTemplate>
                                         </RepeatButton.Template>
                                     </RepeatButton>
@@ -36,7 +38,7 @@
                                     <RepeatButton Command="Slider.IncreaseLarge">
                                         <RepeatButton.Template>
                                             <ControlTemplate>
-                                                <Border Height="6" CornerRadius="3" Background="#444444"/>
+                                                <Border Height="6" CornerRadius="0,3,3,0" Background="#383838"/>
                                             </ControlTemplate>
                                         </RepeatButton.Template>
                                     </RepeatButton>
@@ -46,9 +48,25 @@
                                         <Thumb.Template>
                                             <ControlTemplate TargetType="Thumb">
                                                 <Grid Width="20" Height="20">
-                                                    <Ellipse Width="18" Height="18" Fill="#202020" Stroke="#0078D7" StrokeThickness="3"/>
-                                                    <Ellipse Width="8" Height="8" Fill="#FFFFFF"/>
+                                                    <!-- Outer Ring -->
+                                                    <Ellipse x:Name="OuterRing" Width="18" Height="18" Fill="#1E1E1E" Stroke="#4CC2FF" StrokeThickness="2.5">
+                                                        <Ellipse.Effect>
+                                                            <DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.4" Color="#000000"/>
+                                                        </Ellipse.Effect>
+                                                    </Ellipse>
+                                                    <!-- Inner Core -->
+                                                    <Ellipse x:Name="InnerDot" Width="6" Height="6" Fill="#4CC2FF"/>
                                                 </Grid>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="OuterRing" Property="Stroke" Value="#70D3FF"/>
+                                                        <Setter TargetName="InnerDot" Property="Fill" Value="#70D3FF"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsDragging" Value="True">
+                                                        <Setter TargetName="OuterRing" Property="Stroke" Value="#38AEE6"/>
+                                                        <Setter TargetName="InnerDot" Property="Fill" Value="#38AEE6"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
                                             </ControlTemplate>
                                         </Thumb.Template>
                                     </Thumb>
@@ -139,7 +157,7 @@
                 </Grid>
             </Border>
 
-            <!-- Volume Section -->
+            <!-- Volume Section with Fluent Track and Mouse Wheel -->
             <Border Grid.Row="2" Background="#262626" BorderBrush="#333333" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,16" MouseWheel="BorderVolume_MouseWheel">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -154,7 +172,7 @@
                         </Border>
                     </DockPanel>
 
-                    <Slider x:Name="SliderVolume" Grid.Row="1" Style="{StaticResource FluentSlider}" IsMoveToPointEnabled="True" Value="61" ValueChanged="SliderVolume_ValueChanged"/>
+                    <Slider x:Name="SliderVolume" Grid.Row="1" Style="{StaticResource FluentSlider}" Value="61" ValueChanged="SliderVolume_ValueChanged"/>
                 </Grid>
             </Border>
 
@@ -173,7 +191,7 @@
                 <Button x:Name="BtnSoundField" Grid.Row="0" Grid.Column="0" Style="{StaticResource ActionTile}" Margin="0,0,4,4" Click="BtnSoundField_Click">
                     <StackPanel HorizontalAlignment="Center">
                         <TextBlock Text="Sound Field" FontWeight="SemiBold" FontSize="12" Foreground="#FFFFFF" HorizontalAlignment="Center"/>
-                        <TextBlock x:Name="TxtSoundFieldStatus" Text="On" FontSize="11" Foreground="#0078D7" FontWeight="Medium" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                        <TextBlock x:Name="TxtSoundFieldStatus" Text="On" FontSize="11" Foreground="#4CC2FF" FontWeight="Medium" HorizontalAlignment="Center" Margin="0,2,0,0"/>
                     </StackPanel>
                 </Button>
 

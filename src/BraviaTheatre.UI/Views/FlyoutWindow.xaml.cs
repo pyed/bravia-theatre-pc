@@ -13,9 +13,10 @@ public partial class FlyoutWindow : Window
 {
     private readonly BraviaEngine _engine;
     private bool _isUpdatingUi;
+    private bool _isDraggingSlider;
 
     private static readonly SolidColorBrush GreenBrush = new((Color)ColorConverter.ConvertFromString("#44D644"));
-    private static readonly SolidColorBrush BlueBrush = new((Color)ColorConverter.ConvertFromString("#0078D7"));
+    private static readonly SolidColorBrush BlueBrush = new((Color)ColorConverter.ConvertFromString("#4CC2FF"));
     private static readonly SolidColorBrush GrayBrush = new((Color)ColorConverter.ConvertFromString("#888888"));
     private static readonly SolidColorBrush RedBrush = new((Color)ColorConverter.ConvertFromString("#E81123"));
 
@@ -26,6 +27,9 @@ public partial class FlyoutWindow : Window
 
         Deactivated += (s, e) => Hide();
         Loaded += (s, e) => UpdateState(_engine.CurrentState);
+
+        SliderVolume.PreviewMouseDown += (s, e) => _isDraggingSlider = true;
+        SliderVolume.PreviewMouseUp += (s, e) => _isDraggingSlider = false;
     }
 
     public void ToggleFlyout()
@@ -88,8 +92,11 @@ public partial class FlyoutWindow : Window
                 BadgeChannel.Visibility = Visibility.Collapsed;
             }
 
-            SliderVolume.Value = state.Volume;
-            TxtVolumeValue.Text = state.Volume.ToString();
+            if (!_isDraggingSlider)
+            {
+                SliderVolume.Value = state.Volume;
+                TxtVolumeValue.Text = state.Volume.ToString();
+            }
             SliderVolume.IsEnabled = state.Power;
 
             TxtSoundFieldStatus.Text = state.SoundField ? "On" : "Off";
@@ -123,6 +130,8 @@ public partial class FlyoutWindow : Window
         if (_engine == null) return;
         int step = e.Delta > 0 ? 1 : -1;
         int target = Math.Clamp(_engine.CurrentState.Volume + step, 0, 100);
+        SliderVolume.Value = target;
+        TxtVolumeValue.Text = target.ToString();
         _ = _engine.SetVolumeAsync(target);
     }
 
