@@ -4,13 +4,11 @@ using System.Text.Json;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using BraviaTheatre.Core.Auth;
 using BraviaTheatre.Core.Engine;
 using BraviaTheatre.Core.Models;
 using BraviaTheatre.UI.Services;
 using BraviaTheatre.UI.Views;
-using Hardcodet.Wpf.TaskbarNotification;
 
 namespace BraviaTheatre.UI;
 
@@ -21,7 +19,7 @@ public partial class App : Application
 
     private BraviaEngine? _engine;
     private FlyoutWindow? _flyout;
-    private TaskbarIcon? _trayIcon;
+    private NativeTrayIcon? _trayIcon;
 
     private MenuItem? _headerMenuItem;
     private MenuItem? _autoStartMenuItem;
@@ -31,6 +29,9 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // Prevent application from closing when modal dialogs close
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
         base.OnStartup(e);
 
         _singleInstanceMutex = new Mutex(true, MutexName, out bool createdNew);
@@ -118,15 +119,10 @@ public partial class App : Application
 
     private void InitializeTray()
     {
-        _trayIcon = new TaskbarIcon
+        _trayIcon = new NativeTrayIcon
         {
-            ToolTipText = "BRAVIA Theatre PC",
-            Icon = IconHelper.GetTrayIcon("idle")
+            LeftClickAction = () => _flyout?.ToggleFlyout()
         };
-
-        // Left-click / double-click opens Quick Settings flyout
-        _trayIcon.TrayLeftMouseDown += (s, e) => _flyout?.ToggleFlyout();
-        _trayIcon.TrayMouseDoubleClick += (s, e) => _flyout?.ToggleFlyout();
 
         // Right-click context menu
         var menu = new ContextMenu();
@@ -188,6 +184,7 @@ public partial class App : Application
         menu.Items.Add(exitItem);
 
         _trayIcon.ContextMenu = menu;
+        _trayIcon.Show(IconHelper.GetTrayIcon("idle"), "BRAVIA Theatre PC");
     }
 
     private void OnEngineStateChanged(SoundbarState state)
@@ -196,8 +193,7 @@ public partial class App : Application
         {
             if (_trayIcon != null)
             {
-                _trayIcon.Icon = IconHelper.GetTrayIcon(state.CodecBadgeKind);
-                _trayIcon.ToolTipText = state.HumanCodec;
+                _trayIcon.UpdateIcon(IconHelper.GetTrayIcon(state.CodecBadgeKind), state.HumanCodec);
             }
 
             if (_headerMenuItem != null)
