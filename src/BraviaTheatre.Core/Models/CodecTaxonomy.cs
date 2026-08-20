@@ -11,12 +11,19 @@ public static class CodecTaxonomy
         ["dolby_atmos_truehd"] = "atmos_truehd",
         ["dolby_atmos_mat"] = "atmos",
         ["dolby_atmos_digital_plus"] = "atmos",
+        ["dolby_atmos"] = "atmos",
+        ["atmos"] = "atmos",
 
-        // Dolby Family
+        // Dolby Audio Family
         ["dolby_digital_truehd"] = "truehd",
         ["dolby_digital_plus"] = "ddplus",
-        ["dolby_mat"] = "ddplus",
         ["dolby_digital"] = "dd",
+        ["dolby_mat"] = "ddplus",
+        ["dolby_audio"] = "ddplus",
+        ["ddplus"] = "ddplus",
+        ["dd"] = "dd",
+        ["eac3"] = "ddplus",
+        ["ac3"] = "dd",
 
         // DTS Family
         ["dts_x"] = "dtsx",
@@ -47,10 +54,12 @@ public static class CodecTaxonomy
         ["dolby_atmos_truehd"] = "Dolby Atmos (TrueHD)",
         ["dolby_atmos_mat"] = "Dolby Atmos (MAT)",
         ["dolby_atmos_digital_plus"] = "Dolby Atmos (DD+)",
+        ["dolby_atmos"] = "Dolby Atmos",
         ["dolby_digital_truehd"] = "Dolby TrueHD",
         ["dolby_digital_plus"] = "Dolby Digital Plus",
-        ["dolby_mat"] = "Dolby MAT",
         ["dolby_digital"] = "Dolby Digital",
+        ["dolby_mat"] = "Dolby MAT",
+        ["dolby_audio"] = "Dolby Audio",
         ["dts_x"] = "DTS:X",
         ["dts_x_master_audio"] = "DTS:X Master Audio",
         ["dts_x_high_resolution"] = "DTS:X High Resolution",
@@ -84,11 +93,12 @@ public static class CodecTaxonomy
 
         if (clean.Contains("atmos")) return "atmos";
         if (clean.Contains("truehd")) return "truehd";
+        if (clean.Contains("digital_plus") || clean.Contains("ddplus") || clean.Contains("eac3")) return "ddplus";
         if (clean.Contains("dts_x") || clean.Contains("dtsx")) return "dtsx";
         if (clean.Contains("dts_hd") || clean.Contains("dtshd")) return "dtshd";
         if (clean.Contains("dts")) return "dts";
         if (clean.Contains("pcm")) return "lpcm";
-        if (clean.Contains("dolby")) return "dd";
+        if (clean.Contains("dolby") || clean.Contains("ac3")) return "dd";
         if (clean.Contains("360")) return "360ra";
         if (clean.Contains("aac")) return "aac";
 

@@ -124,4 +124,22 @@ public class WireCodecTests
 
         Assert.Equal(expectedHex, Convert.ToHexString(bytes).ToLowerInvariant());
     }
+
+    [Theory]
+    [InlineData("dolby_atmos_truehd", "atmos_truehd", "Dolby Atmos (TrueHD)")]
+    [InlineData("dolby_atmos_digital_plus", "atmos", "Dolby Atmos (DD+)")]
+    [InlineData("dolby_digital_plus", "ddplus", "Dolby Digital Plus")]
+    [InlineData("dolby_digital", "dd", "Dolby Digital")]
+    [InlineData("dolby_audio", "ddplus", "Dolby Audio")]
+    [InlineData("dts_x_master_audio", "dtsx", "DTS:X Master Audio")]
+    [InlineData("dts_hd_master_audio", "dtshd", "DTS-HD MA")]
+    [InlineData("lpcm", "lpcm", "LPCM")]
+    public void TestCodecClassification(string raw, string expectedKind, string expectedLabel)
+    {
+        var kind = BraviaTheatre.Core.Models.CodecTaxonomy.Classify(raw);
+        var label = BraviaTheatre.Core.Models.CodecTaxonomy.FormatHumanReadable(raw);
+
+        Assert.Equal(expectedKind, kind);
+        Assert.Equal(expectedLabel, label);
+    }
 }
