@@ -216,18 +216,31 @@ public static class SonyOAuth
 
         using var keysDoc = JsonDocument.Parse(keysJson);
 
-        var sessionId = keysDoc.RootElement.TryGetProperty("session_id", out var sIdProp) ? sIdProp.GetString() : null;
-        var hmacKey = keysDoc.RootElement.TryGetProperty("hmac_key", out var hProp) ? hProp.GetString() : null;
-        var cId = keysDoc.RootElement.TryGetProperty("client_id", out var cProp) ? cProp.GetString() : ClientId;
+        string? sessionId = null;
+        if (keysDoc.RootElement.TryGetProperty("session_id", out var sIdProp))
+            sessionId = sIdProp.GetString();
+        else if (keysDoc.RootElement.TryGetProperty("key_id", out var kIdProp))
+            sessionId = kIdProp.GetString();
+
+        string? hmacKey = null;
+        if (keysDoc.RootElement.TryGetProperty("hmac_key", out var hProp))
+            hmacKey = hProp.GetString();
+        else if (keysDoc.RootElement.TryGetProperty("session_key", out var skProp))
+            hmacKey = skProp.GetString();
+
+        string? cId = null;
+        if (keysDoc.RootElement.TryGetProperty("client_id", out var cProp))
+            cId = cProp.GetString();
+        cId ??= ClientId;
 
         if (string.IsNullOrEmpty(sessionId) || string.IsNullOrEmpty(hmacKey))
         {
-            throw new InvalidOperationException($"Invalid session keys response: {keysJson}");
+            throw new InvalidOperationException($"Invalid session keys response from Sony:\n{keysJson}");
         }
 
         return new SonyCredentials
         {
-            ClientId = cId ?? ClientId,
+            ClientId = cId,
             SessionId = sessionId,
             HmacKey = hmacKey,
             AccessToken = accessToken,

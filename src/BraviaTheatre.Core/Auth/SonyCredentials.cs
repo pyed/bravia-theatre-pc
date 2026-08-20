@@ -8,13 +8,33 @@ namespace BraviaTheatre.Core.Auth;
 public sealed class SonyCredentials
 {
     [JsonPropertyName("client_id")]
-    public string ClientId { get; set; } = string.Empty;
+    public string ClientId { get; set; } = "4f97b8e2-0bb3-45ef-be91-b68e85ca7ee1";
 
     [JsonPropertyName("session_id")]
-    public string SessionId { get; set; } = string.Empty;
+    public string? SessionIdRaw { get; set; }
+
+    [JsonPropertyName("key_id")]
+    public string? KeyIdRaw { get; set; }
+
+    [JsonIgnore]
+    public string SessionId
+    {
+        get => !string.IsNullOrEmpty(SessionIdRaw) ? SessionIdRaw : (KeyIdRaw ?? string.Empty);
+        set => SessionIdRaw = value;
+    }
 
     [JsonPropertyName("hmac_key")]
-    public string HmacKey { get; set; } = string.Empty;
+    public string? HmacKeyRaw { get; set; }
+
+    [JsonPropertyName("session_key")]
+    public string? SessionKeyRaw { get; set; }
+
+    [JsonIgnore]
+    public string HmacKey
+    {
+        get => !string.IsNullOrEmpty(HmacKeyRaw) ? HmacKeyRaw : (SessionKeyRaw ?? string.Empty);
+        set => HmacKeyRaw = value;
+    }
 
     [JsonPropertyName("access_token")]
     public string? AccessToken { get; set; }
@@ -33,7 +53,10 @@ public sealed class SonyCredentials
         try
         {
             var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<SonyCredentials>(json);
+            var creds = JsonSerializer.Deserialize<SonyCredentials>(json);
+            if (creds != null && (!string.IsNullOrEmpty(creds.SessionId)) && (!string.IsNullOrEmpty(creds.HmacKey)))
+                return creds;
+            return creds;
         }
         catch
         {
@@ -43,6 +66,12 @@ public sealed class SonyCredentials
 
     public void SaveToFile(string path)
     {
+        // Ensure canonical fields are set
+        SessionIdRaw ??= SessionId;
+        KeyIdRaw ??= SessionId;
+        HmacKeyRaw ??= HmacKey;
+        SessionKeyRaw ??= HmacKey;
+
         var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(path, json);
     }
