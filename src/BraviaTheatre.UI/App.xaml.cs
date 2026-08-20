@@ -26,17 +26,22 @@ public partial class App : Application
     private MenuItem? _promoteMenuItem;
 
     private string _keysPath = "session_keys.json";
-
+    private static readonly object _logLock = new();
     public static void Log(string message)
     {
-        try
+        lock (_logLock)
         {
-            var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}";
-            File.AppendAllText("bravia_csharp.log", line + Environment.NewLine);
-        }
-        catch
-        {
-            // Ignore logging errors
+            try
+            {
+                var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}";
+                using var stream = new FileStream("bravia_csharp.log", FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                using var writer = new StreamWriter(stream);
+                writer.WriteLine(line);
+            }
+            catch
+            {
+                // Ignore logging errors
+            }
         }
     }
 
@@ -141,7 +146,10 @@ public partial class App : Application
         }
 
         // Initialize Core Engine
-        _engine = new BraviaEngine(creds, host, port);
+        _engine = new BraviaEngine(creds, host, port)
+        {
+            LogAction = Log
+        };
 
         // Initialize Flyout
         _flyout = new FlyoutWindow(_engine);

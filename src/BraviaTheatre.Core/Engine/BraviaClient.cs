@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using BraviaTheatre.Core.Auth;
@@ -42,12 +44,15 @@ public sealed class BraviaClient : IDisposable
     private readonly SonyCredentials _creds;
 
     private byte[]? _sessionRandom;
-    private string? _sessionId;
+    private string _sessionId = string.Empty;
     private readonly SemaphoreSlim _sessionLock = new(1, 1);
+
+    public Action<string>? LogAction { get; set; }
 
     public BraviaClient(string host, int port, SonyCredentials credentials)
     {
         _creds = credentials;
+        _sessionId = credentials.SessionId;
 
         var httpHandler = new SocketsHttpHandler
         {
@@ -73,11 +78,35 @@ public sealed class BraviaClient : IDisposable
         await _sessionLock.WaitAsync(ct);
         try
         {
-            var req = new GetSessionRandomRequest { SessionId = _creds.SessionId };
+            // 1. ConfirmSignin: SHA256 of device_id
+            using var sha = SHA256.Create();
+            var devIdBytes = Encoding.UTF8.GetBytes(_creds.DeviceId ?? string.Empty);
+            var authData = sha.ComputeHash(devIdBytes);
+
+            var signinReq = new ConfirmSigninRequest
+            {
+                AuthData = ByteString.CopyFrom(authData)
+            };
+            await _protoClient.ConfirmSigninAsync(signinReq, cancellationToken: ct);
+
+            // 2. ConfirmKeys: HMAC-SHA256 of session_id using hmac_key
+            var sessId = _creds.SessionId;
+            var sessIdBytes = Encoding.UTF8.GetBytes(sessId);
+            var keyData = PacketSigner.ComputeHmac(_creds.HmacKey, sessIdBytes);
+
+            var keysReq = new ConfirmKeysRequest
+            {
+                SessionId = sessId,
+                KeyData = ByteString.CopyFrom(keyData)
+            };
+            await _protoClient.ConfirmKeysAsync(keysReq, cancellationToken: ct);
+
+            // 3. GetSessionRandom
+            var req = new GetSessionRandomRequest { SessionId = sessId };
             var resp = await _protoClient.GetSessionRandomAsync(req, cancellationToken: ct);
 
             _sessionRandom = resp.SessionRandom.ToByteArray();
-            _sessionId = resp.SessionId;
+            _sessionId = !string.IsNullOrEmpty(resp.SessionId) ? resp.SessionId : sessId;
         }
         finally
         {
@@ -87,20 +116,39 @@ public sealed class BraviaClient : IDisposable
 
     public async Task<Dictionary<string, object?>> GetInitialStatesAsync(IEnumerable<string> paths, CancellationToken ct = default)
     {
+        var result = new Dictionary<string, object?>();
+        foreach (var path in paths)
+        {
+            try
+            {
+                var dict = await GetSingleStateAsync(path, ct);
+                foreach (var (k, v) in dict)
+                    result[k] = v;
+            }
+            catch (Exception ex)
+            {
+                LogAction?.Invoke($"GetSingleStateAsync('{path}') error: {ex.Message}");
+            }
+        }
+        return result;
+    }
+
+    public async Task<Dictionary<string, object?>> GetSingleStateAsync(string path, CancellationToken ct = default)
+    {
         await _sessionLock.WaitAsync(ct);
         try
         {
-            if (_sessionRandom == null || _sessionId == null)
+            if (_sessionRandom == null || string.IsNullOrEmpty(_sessionId))
             {
                 var reqRandom = new GetSessionRandomRequest { SessionId = _creds.SessionId };
                 var respRandom = await _protoClient.GetSessionRandomAsync(reqRandom, cancellationToken: ct);
                 _sessionRandom = respRandom.SessionRandom.ToByteArray();
-                _sessionId = respRandom.SessionId;
+                _sessionId = !string.IsNullOrEmpty(respRandom.SessionId) ? respRandom.SessionId : _creds.SessionId;
             }
 
-            var reqBytes = StatesCodec.BuildGetStatesRequest(
+            var reqBytes = StatesCodec.BuildSingleGetStatesRequest(
                 _creds.HmacKey,
-                paths,
+                path,
                 _sessionRandom,
                 _sessionId);
 
@@ -108,8 +156,8 @@ public sealed class BraviaClient : IDisposable
             var respBytes = await call.ResponseAsync;
 
             var (newRandom, _, newSessionId) = StatesCodec.ExtractSessionTokens(respBytes);
-            if (newRandom != null) _sessionRandom = newRandom;
-            if (newSessionId != null) _sessionId = newSessionId;
+            if (newRandom != null && newRandom.Length == 8) _sessionRandom = newRandom;
+            if (!string.IsNullOrEmpty(newSessionId)) _sessionId = newSessionId;
 
             return StatesCodec.ParseGetStatesResponse(respBytes);
         }
@@ -133,7 +181,7 @@ public sealed class BraviaClient : IDisposable
             var reqRandom = new GetSessionRandomRequest { SessionId = _creds.SessionId };
             var respRandom = await _protoClient.GetSessionRandomAsync(reqRandom, cancellationToken: ct);
             _sessionRandom = respRandom.SessionRandom.ToByteArray();
-            _sessionId = respRandom.SessionId;
+            _sessionId = !string.IsNullOrEmpty(respRandom.SessionId) ? respRandom.SessionId : _creds.SessionId;
 
             var reqBytes = CommandBuilder.BuildExecCommandRequest(
                 _creds.HmacKey,

@@ -7,45 +7,91 @@ namespace BraviaTheatre.Core.Wire;
 
 public static class StatesCodec
 {
+    public static byte[] BuildSingleGetStatesRequest(
+        string hmacKeyHex,
+        string fieldPath,
+        byte[] sessionRandom,
+        string sessionId)
+    {
+        var pathBytes = Encoding.UTF8.GetBytes(fieldPath);
+        var depth2 = ProtobufWireCodec.LengthDelimited(1, pathBytes);
+        var depth1 = ProtobufWireCodec.LengthDelimited(1, depth2);
+
+        var sessionIdBytes = Encoding.UTF8.GetBytes(sessionId);
+        using var msEmbedded = new MemoryStream();
+        var fRand = ProtobufWireCodec.LengthDelimited(1, sessionRandom);
+        msEmbedded.Write(fRand, 0, fRand.Length);
+        var fId = ProtobufWireCodec.LengthDelimited(3, sessionIdBytes);
+        msEmbedded.Write(fId, 0, fId.Length);
+        var embeddedData = msEmbedded.ToArray();
+        var embeddedField = ProtobufWireCodec.LengthDelimited(2, embeddedData);
+
+        var inner = new byte[depth1.Length + embeddedField.Length];
+        Buffer.BlockCopy(depth1, 0, inner, 0, depth1.Length);
+        Buffer.BlockCopy(embeddedField, 0, inner, depth1.Length, embeddedField.Length);
+
+        var authToken = PacketSigner.ComputeHmac(hmacKeyHex, inner);
+
+        var fieldListBytes = ProtobufWireCodec.LengthDelimited(1, inner);
+        var authBytes = ProtobufWireCodec.LengthDelimited(2, authToken);
+
+        var result = new byte[fieldListBytes.Length + authBytes.Length];
+        Buffer.BlockCopy(fieldListBytes, 0, result, 0, fieldListBytes.Length);
+        Buffer.BlockCopy(authBytes, 0, result, fieldListBytes.Length, authBytes.Length);
+
+        return result;
+    }
+
     public static byte[] BuildGetStatesRequest(
         string hmacKeyHex,
         IEnumerable<string> fieldPaths,
         byte[] sessionRandom,
         string sessionId)
     {
-        using var msInner = new MemoryStream();
-
-        foreach (var path in fieldPaths)
+        var pathList = new List<string>(fieldPaths);
+        if (pathList.Count == 1)
         {
-            var pathBytes = Encoding.UTF8.GetBytes(path);
-            var depth2 = ProtobufWireCodec.LengthDelimited(1, pathBytes);
-            var depth1 = ProtobufWireCodec.LengthDelimited(1, depth2);
-            msInner.Write(depth1, 0, depth1.Length);
+            return BuildSingleGetStatesRequest(hmacKeyHex, pathList[0], sessionRandom, sessionId);
         }
 
-        // Embedded session
-        var idBytes = Encoding.UTF8.GetBytes(sessionId);
-        using var msSession = new MemoryStream();
-        var f1 = ProtobufWireCodec.LengthDelimited(1, sessionRandom);
-        msSession.Write(f1, 0, f1.Length);
-        var f3 = ProtobufWireCodec.LengthDelimited(3, idBytes);
-        msSession.Write(f3, 0, f3.Length);
+        // 1. Inner parts: each path encoded as 0x0A + len + pathBytes
+        using var msInnerParts = new MemoryStream();
+        foreach (var path in pathList)
+        {
+            var pathBytes = Encoding.UTF8.GetBytes(path);
+            var f = ProtobufWireCodec.LengthDelimited(1, pathBytes);
+            msInnerParts.Write(f, 0, f.Length);
+        }
+        var innerParts = msInnerParts.ToArray();
+        var nestedField = ProtobufWireCodec.LengthDelimited(1, innerParts);
 
-        var sessionData = msSession.ToArray();
-        var sessionField = ProtobufWireCodec.LengthDelimited(2, sessionData);
-        msInner.Write(sessionField, 0, sessionField.Length);
+        // 2. Embedded session data: 0x0A + len + sessionRandom + 0x1A + len + sessionIdBytes
+        var sessionIdBytes = Encoding.UTF8.GetBytes(sessionId);
+        using var msEmbedded = new MemoryStream();
+        var fRand = ProtobufWireCodec.LengthDelimited(1, sessionRandom);
+        msEmbedded.Write(fRand, 0, fRand.Length);
+        var fId = ProtobufWireCodec.LengthDelimited(3, sessionIdBytes);
+        msEmbedded.Write(fId, 0, fId.Length);
+        var embeddedData = msEmbedded.ToArray();
+        var embeddedField = ProtobufWireCodec.LengthDelimited(2, embeddedData);
 
-        var innerBody = msInner.ToArray();
-        var authToken = PacketSigner.ComputeHmac(hmacKeyHex, innerBody);
+        // 3. Preimage for HMAC is nestedField + embeddedField
+        var field1Content = new byte[nestedField.Length + embeddedField.Length];
+        Buffer.BlockCopy(nestedField, 0, field1Content, 0, nestedField.Length);
+        Buffer.BlockCopy(embeddedField, 0, field1Content, nestedField.Length, embeddedField.Length);
 
-        var fieldListBlock = ProtobufWireCodec.LengthDelimited(1, innerBody);
-        var authBlock = ProtobufWireCodec.LengthDelimited(2, authToken);
+        // 4. HMAC-SHA256 token
+        var authToken = PacketSigner.ComputeHmac(hmacKeyHex, field1Content);
 
-        var outer = new byte[fieldListBlock.Length + authBlock.Length];
-        Buffer.BlockCopy(fieldListBlock, 0, outer, 0, fieldListBlock.Length);
-        Buffer.BlockCopy(authBlock, 0, outer, fieldListBlock.Length, authBlock.Length);
+        // 5. Final wire layout: field_list_bytes + auth_token_bytes
+        var fieldListBytes = ProtobufWireCodec.LengthDelimited(1, field1Content);
+        var authBytes = ProtobufWireCodec.LengthDelimited(2, authToken);
 
-        return ProtobufWireCodec.LengthDelimited(1, outer);
+        var result = new byte[fieldListBytes.Length + authBytes.Length];
+        Buffer.BlockCopy(fieldListBytes, 0, result, 0, fieldListBytes.Length);
+        Buffer.BlockCopy(authBytes, 0, result, fieldListBytes.Length, authBytes.Length);
+
+        return result;
     }
 
     public static (byte[]? sessionRandom, byte[]? authToken, string? sessionId) ExtractSessionTokens(byte[] raw)

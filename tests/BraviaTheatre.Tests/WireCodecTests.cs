@@ -87,4 +87,27 @@ public class WireCodecTests
         var code = BraviaTheatre.Core.Auth.SonyOAuth.ParseAuthorizationCode(input);
         Assert.Equal(expectedCode, code);
     }
+
+    [Fact]
+    public void TestParseGetStatesResponse()
+    {
+        var raw = Convert.FromHexString("12580a0e0a0c0a06766f6c756d65120208511220244df0e107ff5017655828d7a23d65f7514b4dfc01c36733ade21952a559f1341a2437343931643738642d643039622d343634382d613739312d313136613530636363393061");
+        var states = StatesCodec.ParseGetStatesResponse(raw);
+        Assert.True(states.ContainsKey("volume"));
+        Assert.Equal(81, Convert.ToInt32(states["volume"]));
+    }
+
+    [Fact]
+    public void TestBuildSingleGetStatesRequest()
+    {
+        var path = "volume";
+        var rnd = Convert.FromHexString("0102030405060708");
+        var sid = "7491d78d-d09b-4648-a791-116a50ccc90a";
+        var key = "***REMOVED***";
+
+        var bytes = StatesCodec.BuildSingleGetStatesRequest(key, path, rnd, sid);
+        var expectedHex = "0a3c0a080a06766f6c756d6512300a0801020304050607081a2437343931643738642d643039622d343634382d613739312d313136613530636363393061122029e4309d3ccc3fdcb8fd506037ddf3978405e0c79b874c5d96606a5e2d6846a4";
+
+        Assert.Equal(expectedHex, Convert.ToHexString(bytes).ToLowerInvariant());
+    }
 }
