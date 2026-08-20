@@ -20,6 +20,7 @@ public sealed class BraviaEngine : IDisposable
         "mute",
         "sound_setting.night_mode",
         "sound_setting.sound_field",
+        "sound_setting.volume.bass",
         "playback_control.audio_format",
         "playback_control.audio_channel"
     };
@@ -259,7 +260,7 @@ public sealed class BraviaEngine : IDisposable
                 await Task.Delay(TimeSpan.FromSeconds(25), ct);
                 if (_client == null || ct.IsCancellationRequested) break;
 
-                var snapshot = await _client.GetInitialStatesAsync(new[] { "power", "volume", "playback_control.audio_format" }, ct);
+                var snapshot = await _client.GetInitialStatesAsync(new[] { "power", "volume", "sound_setting.volume.bass", "playback_control.audio_format" }, ct);
                 ApplySnapshot(snapshot, CurrentState.DeviceName ?? "BRAVIA Theatre");
             }
             catch
@@ -278,6 +279,7 @@ public sealed class BraviaEngine : IDisposable
             bool mute = _currentState.Mute;
             bool soundField = _currentState.SoundField;
             bool nightMode = _currentState.NightMode;
+            string bass = _currentState.Bass;
             string? codec = _currentState.Codec;
             string? channel = _currentState.Channel;
 
@@ -295,6 +297,13 @@ public sealed class BraviaEngine : IDisposable
 
             if (snapshot.TryGetValue("sound_setting.sound_field", out var sfObj) && sfObj != null)
                 soundField = sfObj.ToString() == "on" || sfObj.ToString() == "1" || sfObj.ToString() == "true" || sfObj.ToString() == "True" || (sfObj is bool sfb && sfb);
+
+            if (snapshot.TryGetValue("sound_setting.volume.bass", out var bObj) && bObj != null)
+            {
+                var bStr = bObj.ToString()?.ToLowerInvariant();
+                if (bStr == "min" || bStr == "mid" || bStr == "max")
+                    bass = bStr;
+            }
 
             if (snapshot.TryGetValue("audio_output.stream_info.audio_format", out var cObj) && cObj != null)
             {
@@ -331,6 +340,7 @@ public sealed class BraviaEngine : IDisposable
                 Mute = mute,
                 SoundField = soundField,
                 NightMode = nightMode,
+                Bass = bass,
                 Codec = codec,
                 Channel = channel
             };
@@ -374,6 +384,15 @@ public sealed class BraviaEngine : IDisposable
                 cur = cur with { SoundField = sf };
                 updated = true;
             }
+            else if (path == "sound_setting.volume.bass")
+            {
+                var bStr = value.ToString()?.ToLowerInvariant();
+                if (bStr == "min" || bStr == "mid" || bStr == "max")
+                {
+                    cur = cur with { Bass = bStr };
+                    updated = true;
+                }
+            }
             else if (path == "playback_control.audio_format" || path == "audio_output.stream_info.audio_format")
             {
                 var format = value.ToString();
@@ -410,6 +429,21 @@ public sealed class BraviaEngine : IDisposable
             StateChanged?.Invoke(_currentState);
         }
         _cmdChannel.Writer.TryWrite(("volume", volume));
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> SetBassAsync(string level)
+    {
+        level = level.ToLowerInvariant();
+        if (level != "min" && level != "mid" && level != "max") return Task.FromResult(false);
+
+        lock (_stateLock)
+        {
+            if (!_currentState.Power || _currentState.Bass == level) return Task.FromResult(false);
+            _currentState = _currentState with { Bass = level };
+            StateChanged?.Invoke(_currentState);
+        }
+        _cmdChannel.Writer.TryWrite(("sound_setting.volume.bass", level));
         return Task.FromResult(true);
     }
 

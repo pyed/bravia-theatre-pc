@@ -8,6 +8,7 @@ public sealed record SoundbarState
     public bool Mute { get; init; }
     public bool NightMode { get; init; }
     public bool SoundField { get; init; }
+    public string Bass { get; init; } = "mid";
     public string? Codec { get; init; }
     public string? Channel { get; init; }
     public string? Input { get; init; }
@@ -24,6 +25,7 @@ public sealed record SoundbarState
         Mute = false,
         NightMode = false,
         SoundField = false,
+        Bass = "mid",
         Codec = null,
         Channel = null,
         Input = null,

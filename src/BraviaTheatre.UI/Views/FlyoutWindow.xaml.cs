@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using BraviaTheatre.Core.Engine;
@@ -18,6 +19,7 @@ public partial class FlyoutWindow : Window
     private static readonly SolidColorBrush GreenBrush = new((Color)ColorConverter.ConvertFromString("#44D644"));
     private static readonly SolidColorBrush BlueBrush = new((Color)ColorConverter.ConvertFromString("#4CC2FF"));
     private static readonly SolidColorBrush GrayBrush = new((Color)ColorConverter.ConvertFromString("#888888"));
+    private static readonly SolidColorBrush LightGrayBrush = new((Color)ColorConverter.ConvertFromString("#D0D0D0"));
     private static readonly SolidColorBrush RedBrush = new((Color)ColorConverter.ConvertFromString("#E81123"));
 
     public FlyoutWindow(BraviaEngine engine)
@@ -99,6 +101,10 @@ public partial class FlyoutWindow : Window
             }
             SliderVolume.IsEnabled = state.Power;
 
+            IconSpeaker.Fill = state.Mute ? RedBrush : LightGrayBrush;
+
+            UpdateBassPills(state.Bass);
+
             TxtSoundFieldStatus.Text = state.SoundField ? "On" : "Off";
             TxtSoundFieldStatus.Foreground = state.SoundField ? BlueBrush : GrayBrush;
 
@@ -117,6 +123,21 @@ public partial class FlyoutWindow : Window
         }
     }
 
+    private void UpdateBassPills(string bass)
+    {
+        bass = bass.ToLowerInvariant();
+        ApplyBassBtnStyle(BtnBassMin, bass == "min");
+        ApplyBassBtnStyle(BtnBassMid, bass == "mid");
+        ApplyBassBtnStyle(BtnBassMax, bass == "max");
+    }
+
+    private void ApplyBassBtnStyle(Button btn, bool active)
+    {
+        if (btn == null) return;
+        btn.Background = active ? BlueBrush : Brushes.Transparent;
+        btn.Foreground = active ? Brushes.Black : GrayBrush;
+    }
+
     private void SliderVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (_isUpdatingUi || TxtVolumeValue == null || _engine == null) return;
@@ -133,6 +154,24 @@ public partial class FlyoutWindow : Window
         SliderVolume.Value = target;
         TxtVolumeValue.Text = target.ToString();
         _ = _engine.SetVolumeAsync(target);
+    }
+
+    private void BtnBassMin_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateBassPills("min");
+        _ = _engine.SetBassAsync("min");
+    }
+
+    private void BtnBassMid_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateBassPills("mid");
+        _ = _engine.SetBassAsync("mid");
+    }
+
+    private void BtnBassMax_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateBassPills("max");
+        _ = _engine.SetBassAsync("max");
     }
 
     private void BtnSoundField_Click(object sender, RoutedEventArgs e)

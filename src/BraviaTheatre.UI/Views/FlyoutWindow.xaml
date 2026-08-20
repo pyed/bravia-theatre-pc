@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="BRAVIA Theatre PC"
-        Width="350" Height="460"
+        Width="350" Height="480"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -11,7 +11,7 @@
         ResizeMode="NoResize">
 
     <Window.Resources>
-        <!-- Windows 11 Sleek Fluent Sound Slider Style -->
+        <!-- Windows 11 Fluent Sound Slider Style matching native quick settings -->
         <Style x:Key="FluentSlider" TargetType="Slider">
             <Setter Property="Minimum" Value="0"/>
             <Setter Property="Maximum" Value="100"/>
@@ -29,7 +29,7 @@
                                     <RepeatButton Command="Slider.DecreaseLarge">
                                         <RepeatButton.Template>
                                             <ControlTemplate>
-                                                <Border Height="6" CornerRadius="3,0,0,3" Background="#4CC2FF"/>
+                                                <Border Height="4.5" CornerRadius="2.25,0,0,2.25" Background="#4CC2FF"/>
                                             </ControlTemplate>
                                         </RepeatButton.Template>
                                     </RepeatButton>
@@ -38,7 +38,7 @@
                                     <RepeatButton Command="Slider.IncreaseLarge">
                                         <RepeatButton.Template>
                                             <ControlTemplate>
-                                                <Border Height="6" CornerRadius="0,3,3,0" Background="#383838"/>
+                                                <Border Height="4.5" CornerRadius="0,2.25,2.25,0" Background="#8A8A8A"/>
                                             </ControlTemplate>
                                         </RepeatButton.Template>
                                     </RepeatButton>
@@ -47,24 +47,20 @@
                                     <Thumb>
                                         <Thumb.Template>
                                             <ControlTemplate TargetType="Thumb">
-                                                <Grid Width="20" Height="20">
-                                                    <!-- Outer Ring -->
-                                                    <Ellipse x:Name="OuterRing" Width="18" Height="18" Fill="#1E1E1E" Stroke="#4CC2FF" StrokeThickness="2.5">
-                                                        <Ellipse.Effect>
-                                                            <DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.4" Color="#000000"/>
-                                                        </Ellipse.Effect>
-                                                    </Ellipse>
-                                                    <!-- Inner Core -->
-                                                    <Ellipse x:Name="InnerDot" Width="6" Height="6" Fill="#4CC2FF"/>
+                                                <Grid Width="22" Height="22">
+                                                    <!-- Outer Translucent Dark Halo -->
+                                                    <Ellipse x:Name="OuterHalo" Width="20" Height="20" Fill="#444444" Opacity="0.85"/>
+                                                    <!-- Inner Solid Fluent Blue Core -->
+                                                    <Ellipse x:Name="InnerCore" Width="12" Height="12" Fill="#4CC2FF"/>
                                                 </Grid>
                                                 <ControlTemplate.Triggers>
                                                     <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter TargetName="OuterRing" Property="Stroke" Value="#70D3FF"/>
-                                                        <Setter TargetName="InnerDot" Property="Fill" Value="#70D3FF"/>
+                                                        <Setter TargetName="OuterHalo" Property="Fill" Value="#555555"/>
+                                                        <Setter TargetName="InnerCore" Property="Fill" Value="#6CD4FF"/>
                                                     </Trigger>
                                                     <Trigger Property="IsDragging" Value="True">
-                                                        <Setter TargetName="OuterRing" Property="Stroke" Value="#38AEE6"/>
-                                                        <Setter TargetName="InnerDot" Property="Fill" Value="#38AEE6"/>
+                                                        <Setter TargetName="OuterHalo" Property="Fill" Value="#333333"/>
+                                                        <Setter TargetName="InnerCore" Property="Fill" Value="#38AEE6"/>
                                                     </Trigger>
                                                 </ControlTemplate.Triggers>
                                             </ControlTemplate>
@@ -73,6 +69,58 @@
                                 </Track.Thumb>
                             </Track>
                         </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Bass Pill Segment Button Style -->
+        <Style x:Key="BassSegmentBtn" TargetType="Button">
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="MinWidth" Value="44"/>
+            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#888888"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="1,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="segBorder" Background="{TemplateBinding Background}" CornerRadius="4" Padding="6,2">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="segBorder" Property="Background" Value="#2E2E2E"/>
+                                <Setter Property="Foreground" Value="#CCCCCC"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Flat Icon Button Style -->
+        <Style x:Key="IconButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="iconBorder" Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="iconBorder" Property="Background" Value="#333333"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="iconBorder" Property="Background" Value="#222222"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -119,7 +167,7 @@
                 <RowDefinition Height="Auto"/>
                 <!-- Hero Codec Card -->
                 <RowDefinition Height="Auto"/>
-                <!-- Volume Slider -->
+                <!-- Volume & Bass Section -->
                 <RowDefinition Height="Auto"/>
                 <!-- Action Tiles -->
                 <RowDefinition Height="*"/>
@@ -134,7 +182,7 @@
             </DockPanel>
 
             <!-- Hero Codec Card -->
-            <Border Grid.Row="1" Background="#262626" BorderBrush="#333333" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,16">
+            <Border Grid.Row="1" Background="#262626" BorderBrush="#333333" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,14">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="64"/>
@@ -157,22 +205,50 @@
                 </Grid>
             </Border>
 
-            <!-- Volume Section with Fluent Track and Mouse Wheel -->
-            <Border Grid.Row="2" Background="#262626" BorderBrush="#333333" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,16" MouseWheel="BorderVolume_MouseWheel">
+            <!-- Volume & Bass Section with Fluent Track and Mouse Wheel -->
+            <Border Grid.Row="2" Background="#262626" BorderBrush="#333333" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,14" MouseWheel="BorderVolume_MouseWheel">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                    <!-- Row 0: Volume Title & Value Badge -->
+                    <DockPanel Grid.Row="0" Margin="0,0,0,6">
                         <TextBlock Text="Volume" Foreground="#D0D0D0" FontSize="12" FontWeight="Medium" VerticalAlignment="Center"/>
                         <Border Background="#333333" CornerRadius="6" Padding="8,2" HorizontalAlignment="Right">
                             <TextBlock x:Name="TxtVolumeValue" Text="61" Foreground="#FFFFFF" FontWeight="Bold" FontSize="12"/>
                         </Border>
                     </DockPanel>
 
-                    <Slider x:Name="SliderVolume" Grid.Row="1" Style="{StaticResource FluentSlider}" Value="61" ValueChanged="SliderVolume_ValueChanged"/>
+                    <!-- Row 1: Speaker Icon + Slider (Matching Windows 11 Native Sound Bar) -->
+                    <Grid Grid.Row="1" Margin="0,2,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Speaker / Mute Icon Button -->
+                        <Button x:Name="BtnSliderMute" Grid.Column="0" Width="26" Height="26" Margin="0,0,8,0" Style="{StaticResource IconButton}" Click="BtnMute_Click">
+                            <Path x:Name="IconSpeaker" Stretch="Uniform" Width="14" Height="14" Fill="#D0D0D0"
+                                  Data="M3,9v6h4l5,5V4L7,9H3z M16.5,12c0-1.77-1.02-3.29-2.5-4.03v8.05C15.48,15.29,16.5,13.77,16.5,12z M14,3.23v2.06c2.89,0.86,5,3.54,5,6.71s-2.11,5.85-5,6.71v2.06c4.01-0.91,7-4.49,7-8.77S18.01,4.14,14,3.23z"/>
+                        </Button>
+
+                        <Slider x:Name="SliderVolume" Grid.Column="1" Style="{StaticResource FluentSlider}" Value="61" ValueChanged="SliderVolume_ValueChanged"/>
+                    </Grid>
+
+                    <!-- Row 2: Compact Bass Level Selector -->
+                    <DockPanel Grid.Row="2" Margin="0,2,0,0">
+                        <TextBlock Text="Bass Level" Foreground="#888888" FontSize="11" FontWeight="Medium" VerticalAlignment="Center"/>
+                        <Border Background="#1C1C1C" BorderBrush="#333333" BorderThickness="1" CornerRadius="5" Padding="2" HorizontalAlignment="Right">
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="BtnBassMin" Content="MIN" Style="{StaticResource BassSegmentBtn}" Click="BtnBassMin_Click"/>
+                                <Button x:Name="BtnBassMid" Content="MID" Style="{StaticResource BassSegmentBtn}" Click="BtnBassMid_Click"/>
+                                <Button x:Name="BtnBassMax" Content="MAX" Style="{StaticResource BassSegmentBtn}" Click="BtnBassMax_Click"/>
+                            </StackPanel>
+                        </Border>
+                    </DockPanel>
                 </Grid>
             </Border>
 
