@@ -88,26 +88,29 @@ public partial class FlyoutWindow : Window
         {
             TxtDeviceName.Text = state.DeviceName ?? "BRAVIA Theatre Bar 9";
 
+            // Glowing Power Button in header
             if (state.Connected)
             {
                 if (state.Power)
                 {
-                    DotConnection.Fill = GreenBrush;
-                    DotShadow.Color = (Color)ColorConverter.ConvertFromString("#44D644");
-                    DotConnection.ToolTip = "Online (Connected)";
+                    IconPower.Fill = GreenBrush;
+                    PowerShadow.Color = (Color)ColorConverter.ConvertFromString("#44D644");
+                    PowerShadow.Opacity = 0.85;
+                    BtnHeaderPower.ToolTip = "Power: Online (Click for Standby)";
                 }
                 else
                 {
-                    DotConnection.Fill = GrayBrush;
-                    DotShadow.Color = (Color)ColorConverter.ConvertFromString("#888888");
-                    DotConnection.ToolTip = "Standby";
+                    IconPower.Fill = GrayBrush;
+                    PowerShadow.Opacity = 0;
+                    BtnHeaderPower.ToolTip = "Power: Standby (Click to Turn On)";
                 }
             }
             else
             {
-                DotConnection.Fill = RedBrush;
-                DotShadow.Color = (Color)ColorConverter.ConvertFromString("#E81123");
-                DotConnection.ToolTip = "Connecting / Offline";
+                IconPower.Fill = RedBrush;
+                PowerShadow.Color = (Color)ColorConverter.ConvertFromString("#E81123");
+                PowerShadow.Opacity = 0.85;
+                BtnHeaderPower.ToolTip = "Connecting / Offline";
             }
 
             // Input Function
@@ -153,9 +156,6 @@ public partial class FlyoutWindow : Window
 
             TxtVoiceModeStatus.Text = state.VoiceMode ? "On" : "Off";
             TxtVoiceModeStatus.Foreground = state.VoiceMode ? BlueBrush : GrayBrush;
-
-            TxtPowerStatus.Text = state.Power ? "On" : "Standby";
-            TxtPowerStatus.Foreground = state.Power ? GreenBrush : GrayBrush;
         }
         finally
         {

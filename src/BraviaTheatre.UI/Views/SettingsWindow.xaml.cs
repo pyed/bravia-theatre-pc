@@ -75,7 +75,7 @@ public partial class SettingsWindow : Window
     {
         TxtHotkeyVolUp.Text = "Ctrl + Alt + Up";
         TxtHotkeyVolDown.Text = "Ctrl + Alt + Down";
-        TxtHotkeyMute.Text = "Ctrl + Alt + M";
+        TxtHotkeyMute.Text = "Ctrl + Shift + M";
         TxtHotkeySoundField.Text = "Ctrl + Alt + S";
         TxtHotkeyVoiceMode.Text = "Ctrl + Alt + V";
         TxtHotkeyNightMode.Text = "Ctrl + Alt + N";

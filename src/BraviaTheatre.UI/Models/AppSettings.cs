@@ -14,7 +14,7 @@ public sealed class AppSettings
     // Configurable Global Hotkeys (Default: Ctrl + Alt + Key)
     public string HotkeyVolumeUp { get; set; } = "Ctrl + Alt + Up";
     public string HotkeyVolumeDown { get; set; } = "Ctrl + Alt + Down";
-    public string HotkeyMute { get; set; } = "Ctrl + Alt + M";
+    public string HotkeyMute { get; set; } = "Ctrl + Shift + M";
     public string HotkeySoundField { get; set; } = "Ctrl + Alt + S";
     public string HotkeyVoiceMode { get; set; } = "Ctrl + Alt + V";
     public string HotkeyNightMode { get; set; } = "Ctrl + Alt + N";
