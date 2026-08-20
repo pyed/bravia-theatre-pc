@@ -70,6 +70,11 @@ public partial class App : Application
 
         DispatcherUnhandledException += (s, args) =>
         {
+            if (args.Exception is OperationCanceledException or ObjectDisposedException)
+            {
+                args.Handled = true;
+                return;
+            }
             Log($"DISPATCHER UNHANDLED EXCEPTION: {args.Exception}");
             MessageBox.Show($"Dispatcher error:\n\n{args.Exception.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
@@ -258,41 +263,60 @@ public partial class App : Application
 
     private void OnEngineStateChanged(SoundbarState state)
     {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+
         Log($"State updated: Connected={state.Connected}, Power={state.Power}, Vol={state.Volume}, Codec={state.Codec}, Ch={state.Channel}, Voice={state.VoiceMode}, Inp={state.Function}");
-        Dispatcher.BeginInvoke(() =>
+        try
         {
-            if (_trayIcon != null)
+            Dispatcher.BeginInvoke(() =>
             {
-                _trayIcon.UpdateIcon(IconHelper.GetTrayIcon(state.CodecBadgeKind), state.HumanCodec);
-            }
+                if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
 
-            if (_headerMenuItem != null)
-            {
-                _headerMenuItem.Header = state.Power ? $"{state.HumanCodec} | Vol: {state.Volume}" : "Standby";
-            }
+                if (_trayIcon != null)
+                {
+                    _trayIcon.UpdateIcon(IconHelper.GetTrayIcon(state.CodecBadgeKind), state.HumanCodec);
+                }
 
-            _flyout?.UpdateState(state);
-        });
+                if (_headerMenuItem != null)
+                {
+                    _headerMenuItem.Header = state.Power ? $"{state.HumanCodec} | Vol: {state.Volume}" : "Standby";
+                }
+
+                _flyout?.UpdateState(state);
+            });
+        }
+        catch { }
     }
 
     private void ShutdownApp()
     {
         Log("Shutting down application.");
-        _hotkeyService?.Dispose();
-        _engine?.Dispose();
-        _trayIcon?.Dispose();
-        _singleInstanceMutex?.ReleaseMutex();
-        _singleInstanceMutex?.Dispose();
-        Shutdown();
+        try
+        {
+            _hotkeyService?.Dispose();
+            _engine?.Dispose();
+            _trayIcon?.Dispose();
+            _singleInstanceMutex?.ReleaseMutex();
+            _singleInstanceMutex?.Dispose();
+        }
+        catch { }
+        finally
+        {
+            Shutdown();
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         Log("Application exited.");
-        _hotkeyService?.Dispose();
-        _engine?.Dispose();
-        _trayIcon?.Dispose();
-        _singleInstanceMutex?.Dispose();
+        try
+        {
+            _hotkeyService?.Dispose();
+            _engine?.Dispose();
+            _trayIcon?.Dispose();
+            _singleInstanceMutex?.Dispose();
+        }
+        catch { }
         base.OnExit(e);
     }
 }

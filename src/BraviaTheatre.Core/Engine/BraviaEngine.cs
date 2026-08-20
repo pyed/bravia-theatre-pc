@@ -587,8 +587,16 @@ public sealed class BraviaEngine : IDisposable
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _client?.Dispose();
-        _cts.Dispose();
+        try
+        {
+            _cts.Cancel();
+        }
+        catch { }
+
+        try
+        {
+            _client?.Dispose();
+        }
+        catch { }
     }
 }
