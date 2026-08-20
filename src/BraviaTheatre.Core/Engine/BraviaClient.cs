@@ -75,7 +75,10 @@ public sealed class BraviaClient : IDisposable
 
     public async Task InitializeSessionAsync(CancellationToken ct = default)
     {
-        await _sessionLock.WaitAsync(ct);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(8));
+
+        await _sessionLock.WaitAsync(cts.Token);
         try
         {
             // 1. ConfirmSignin: SHA256 of device_id
@@ -87,7 +90,7 @@ public sealed class BraviaClient : IDisposable
             {
                 AuthData = ByteString.CopyFrom(authData)
             };
-            await _protoClient.ConfirmSigninAsync(signinReq, cancellationToken: ct);
+            await _protoClient.ConfirmSigninAsync(signinReq, cancellationToken: cts.Token);
 
             // 2. ConfirmKeys: HMAC-SHA256 of session_id using hmac_key
             var sessId = _creds.SessionId;
@@ -99,11 +102,11 @@ public sealed class BraviaClient : IDisposable
                 SessionId = sessId,
                 KeyData = ByteString.CopyFrom(keyData)
             };
-            await _protoClient.ConfirmKeysAsync(keysReq, cancellationToken: ct);
+            await _protoClient.ConfirmKeysAsync(keysReq, cancellationToken: cts.Token);
 
             // 3. GetSessionRandom
             var req = new GetSessionRandomRequest { SessionId = sessId };
-            var resp = await _protoClient.GetSessionRandomAsync(req, cancellationToken: ct);
+            var resp = await _protoClient.GetSessionRandomAsync(req, cancellationToken: cts.Token);
 
             _sessionRandom = resp.SessionRandom.ToByteArray();
             _sessionId = !string.IsNullOrEmpty(resp.SessionId) ? resp.SessionId : sessId;
@@ -135,13 +138,16 @@ public sealed class BraviaClient : IDisposable
 
     public async Task<Dictionary<string, object?>> GetSingleStateAsync(string path, CancellationToken ct = default)
     {
-        await _sessionLock.WaitAsync(ct);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        await _sessionLock.WaitAsync(cts.Token);
         try
         {
             if (_sessionRandom == null || string.IsNullOrEmpty(_sessionId))
             {
                 var reqRandom = new GetSessionRandomRequest { SessionId = _creds.SessionId };
-                var respRandom = await _protoClient.GetSessionRandomAsync(reqRandom, cancellationToken: ct);
+                var respRandom = await _protoClient.GetSessionRandomAsync(reqRandom, cancellationToken: cts.Token);
                 _sessionRandom = respRandom.SessionRandom.ToByteArray();
                 _sessionId = !string.IsNullOrEmpty(respRandom.SessionId) ? respRandom.SessionId : _creds.SessionId;
             }
@@ -152,7 +158,7 @@ public sealed class BraviaClient : IDisposable
                 _sessionRandom,
                 _sessionId);
 
-            var call = _channel.CreateCallInvoker().AsyncUnaryCall(GetStatesMethod, null, new CallOptions(cancellationToken: ct), reqBytes);
+            var call = _channel.CreateCallInvoker().AsyncUnaryCall(GetStatesMethod, null, new CallOptions(cancellationToken: cts.Token), reqBytes);
             var respBytes = await call.ResponseAsync;
 
             var (newRandom, _, newSessionId) = StatesCodec.ExtractSessionTokens(respBytes);
@@ -174,12 +180,15 @@ public sealed class BraviaClient : IDisposable
         string? stringValue = null,
         CancellationToken ct = default)
     {
-        await _sessionLock.WaitAsync(ct);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        await _sessionLock.WaitAsync(cts.Token);
         try
         {
             // Fresh session random is required before each ExecCommand
             var reqRandom = new GetSessionRandomRequest { SessionId = _creds.SessionId };
-            var respRandom = await _protoClient.GetSessionRandomAsync(reqRandom, cancellationToken: ct);
+            var respRandom = await _protoClient.GetSessionRandomAsync(reqRandom, cancellationToken: cts.Token);
             _sessionRandom = respRandom.SessionRandom.ToByteArray();
             _sessionId = !string.IsNullOrEmpty(respRandom.SessionId) ? respRandom.SessionId : _creds.SessionId;
 
@@ -192,7 +201,7 @@ public sealed class BraviaClient : IDisposable
                 boolValue,
                 stringValue);
 
-            var call = _channel.CreateCallInvoker().AsyncUnaryCall(ExecCommandMethod, null, new CallOptions(cancellationToken: ct), reqBytes);
+            var call = _channel.CreateCallInvoker().AsyncUnaryCall(ExecCommandMethod, null, new CallOptions(cancellationToken: cts.Token), reqBytes);
             var respBytes = await call.ResponseAsync;
 
             return CommandBuilder.ParseExecResponse(respBytes);

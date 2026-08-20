@@ -241,7 +241,7 @@ public partial class App : Application
     private void OnEngineStateChanged(SoundbarState state)
     {
         Log($"State updated: Connected={state.Connected}, Power={state.Power}, Vol={state.Volume}, Codec={state.Codec}, Ch={state.Channel}");
-        Dispatcher.Invoke(() =>
+        Dispatcher.BeginInvoke(() =>
         {
             if (_trayIcon != null)
             {

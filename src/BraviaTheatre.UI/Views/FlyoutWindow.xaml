@@ -140,7 +140,7 @@
             </Border>
 
             <!-- Volume Section -->
-            <Border Grid.Row="2" Background="#262626" BorderBrush="#333333" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,16">
+            <Border Grid.Row="2" Background="#262626" BorderBrush="#333333" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,16" MouseWheel="BorderVolume_MouseWheel">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -154,7 +154,7 @@
                         </Border>
                     </DockPanel>
 
-                    <Slider x:Name="SliderVolume" Grid.Row="1" Style="{StaticResource FluentSlider}" Value="61" ValueChanged="SliderVolume_ValueChanged"/>
+                    <Slider x:Name="SliderVolume" Grid.Row="1" Style="{StaticResource FluentSlider}" IsMoveToPointEnabled="True" Value="61" ValueChanged="SliderVolume_ValueChanged"/>
                 </Grid>
             </Border>
 

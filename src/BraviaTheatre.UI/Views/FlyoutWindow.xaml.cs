@@ -51,60 +51,63 @@ public partial class FlyoutWindow : Window
 
     public void UpdateState(SoundbarState state)
     {
-        Dispatcher.Invoke(() =>
+        if (!Dispatcher.CheckAccess())
         {
-            _isUpdatingUi = true;
-            try
+            Dispatcher.BeginInvoke(() => UpdateState(state));
+            return;
+        }
+
+        _isUpdatingUi = true;
+        try
+        {
+            TxtDeviceName.Text = state.DeviceName ?? "BRAVIA Theatre Bar 9";
+
+            if (state.Connected)
             {
-                TxtDeviceName.Text = state.DeviceName ?? "BRAVIA Theatre Bar 9";
-
-                if (state.Connected)
-                {
-                    TxtConnection.Text = state.Power ? "Online" : "Standby";
-                    TxtConnection.Foreground = state.Power ? GreenBrush : GrayBrush;
-                    BadgeConnection.Background = state.Power ? new SolidColorBrush(Color.FromArgb(40, 68, 214, 68)) : new SolidColorBrush(Color.FromArgb(40, 136, 136, 136));
-                }
-                else
-                {
-                    TxtConnection.Text = "Connecting...";
-                    TxtConnection.Foreground = RedBrush;
-                    BadgeConnection.Background = new SolidColorBrush(Color.FromArgb(40, 232, 17, 35));
-                }
-
-                ImgCodecBadge.Source = IconHelper.GetImageSource(state.CodecBadgeKind);
-                TxtCodecName.Text = state.HumanCodec;
-
-                if (!string.IsNullOrEmpty(state.Channel))
-                {
-                    BadgeChannel.Visibility = Visibility.Visible;
-                    TxtChannel.Text = state.Channel.EndsWith("ch", StringComparison.OrdinalIgnoreCase) ? state.Channel : $"{state.Channel} ch";
-                }
-                else
-                {
-                    BadgeChannel.Visibility = Visibility.Collapsed;
-                }
-
-                SliderVolume.Value = state.Volume;
-                TxtVolumeValue.Text = state.Volume.ToString();
-                SliderVolume.IsEnabled = state.Power;
-
-                TxtSoundFieldStatus.Text = state.SoundField ? "On" : "Off";
-                TxtSoundFieldStatus.Foreground = state.SoundField ? BlueBrush : GrayBrush;
-
-                TxtNightModeStatus.Text = state.NightMode ? "On" : "Off";
-                TxtNightModeStatus.Foreground = state.NightMode ? BlueBrush : GrayBrush;
-
-                TxtMuteStatus.Text = state.Mute ? "Muted" : "Unmuted";
-                TxtMuteStatus.Foreground = state.Mute ? RedBrush : GrayBrush;
-
-                TxtPowerStatus.Text = state.Power ? "On" : "Standby";
-                TxtPowerStatus.Foreground = state.Power ? GreenBrush : GrayBrush;
+                TxtConnection.Text = state.Power ? "Online" : "Standby";
+                TxtConnection.Foreground = state.Power ? GreenBrush : GrayBrush;
+                BadgeConnection.Background = state.Power ? new SolidColorBrush(Color.FromArgb(40, 68, 214, 68)) : new SolidColorBrush(Color.FromArgb(40, 136, 136, 136));
             }
-            finally
+            else
             {
-                _isUpdatingUi = false;
+                TxtConnection.Text = "Connecting...";
+                TxtConnection.Foreground = RedBrush;
+                BadgeConnection.Background = new SolidColorBrush(Color.FromArgb(40, 232, 17, 35));
             }
-        });
+
+            ImgCodecBadge.Source = IconHelper.GetImageSource(state.CodecBadgeKind);
+            TxtCodecName.Text = state.HumanCodec;
+
+            if (!string.IsNullOrEmpty(state.Channel))
+            {
+                BadgeChannel.Visibility = Visibility.Visible;
+                TxtChannel.Text = state.Channel.EndsWith("ch", StringComparison.OrdinalIgnoreCase) ? state.Channel : $"{state.Channel} ch";
+            }
+            else
+            {
+                BadgeChannel.Visibility = Visibility.Collapsed;
+            }
+
+            SliderVolume.Value = state.Volume;
+            TxtVolumeValue.Text = state.Volume.ToString();
+            SliderVolume.IsEnabled = state.Power;
+
+            TxtSoundFieldStatus.Text = state.SoundField ? "On" : "Off";
+            TxtSoundFieldStatus.Foreground = state.SoundField ? BlueBrush : GrayBrush;
+
+            TxtNightModeStatus.Text = state.NightMode ? "On" : "Off";
+            TxtNightModeStatus.Foreground = state.NightMode ? BlueBrush : GrayBrush;
+
+            TxtMuteStatus.Text = state.Mute ? "Muted" : "Unmuted";
+            TxtMuteStatus.Foreground = state.Mute ? RedBrush : GrayBrush;
+
+            TxtPowerStatus.Text = state.Power ? "On" : "Standby";
+            TxtPowerStatus.Foreground = state.Power ? GreenBrush : GrayBrush;
+        }
+        finally
+        {
+            _isUpdatingUi = false;
+        }
     }
 
     private void SliderVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -113,6 +116,14 @@ public partial class FlyoutWindow : Window
         int vol = (int)Math.Round(e.NewValue);
         TxtVolumeValue.Text = vol.ToString();
         _ = _engine.SetVolumeAsync(vol);
+    }
+
+    private void BorderVolume_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (_engine == null) return;
+        int step = e.Delta > 0 ? 1 : -1;
+        int target = Math.Clamp(_engine.CurrentState.Volume + step, 0, 100);
+        _ = _engine.SetVolumeAsync(target);
     }
 
     private void BtnSoundField_Click(object sender, RoutedEventArgs e)

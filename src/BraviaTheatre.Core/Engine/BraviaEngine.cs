@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using BraviaTheatre.Core.Auth;
 using BraviaTheatre.Core.Discovery;
@@ -30,6 +31,13 @@ public sealed class BraviaEngine : IDisposable
 
     private BraviaClient? _client;
     private Task? _workerTask;
+
+    private readonly Channel<(string path, object value)> _cmdChannel = Channel.CreateUnbounded<(string, object)>(
+        new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false
+        });
 
     private readonly object _stateLock = new();
     private SoundbarState _currentState = SoundbarState.Disconnected;
@@ -125,7 +133,6 @@ public sealed class BraviaEngine : IDisposable
                         {
                             var msgBytes = notifyStream.ResponseStream.Current;
                             var (path, value) = NotifyParser.ParseNotifyMessage(msgBytes);
-                            Log($"[Notify] Push event ({msgBytes.Length} B): Path='{path}', Value='{value}'");
 
                             if (!string.IsNullOrEmpty(path))
                             {
@@ -156,10 +163,11 @@ public sealed class BraviaEngine : IDisposable
 
                 backoffSec = 5; // Reset backoff on successful connect
 
-                // Keepalive polling loop in parallel
+                // Start command drain loop and keepalive loop
+                var cmdDrainTask = Task.Run(() => CommandDrainLoopAsync(_cts.Token), _cts.Token);
                 _ = Task.Run(() => KeepAlivePollLoopAsync(_cts.Token), _cts.Token);
 
-                await notifyTask;
+                await Task.WhenAny(notifyTask, cmdDrainTask);
             }
             catch (OperationCanceledException)
             {
@@ -184,13 +192,71 @@ public sealed class BraviaEngine : IDisposable
         }
     }
 
+    private async Task CommandDrainLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested && _client != null)
+        {
+            try
+            {
+                if (await _cmdChannel.Reader.WaitToReadAsync(ct))
+                {
+                    while (_cmdChannel.Reader.TryRead(out var cmd))
+                    {
+                        var (path, value) = cmd;
+
+                        // Coalesce rapid volume updates to prevent network lag
+                        if (path == "volume")
+                        {
+                            while (_cmdChannel.Reader.TryPeek(out var next) && next.path == "volume")
+                            {
+                                _cmdChannel.Reader.TryRead(out cmd);
+                                value = cmd.value;
+                            }
+                        }
+
+                        if (_client == null || ct.IsCancellationRequested) break;
+
+                        try
+                        {
+                            if (value is int intVal)
+                            {
+                                await _client.ExecCommandAsync(path, intValue: intVal, ct: ct);
+                            }
+                            else if (value is bool boolVal)
+                            {
+                                await _client.ExecCommandAsync(path, boolValue: boolVal, ct: ct);
+                            }
+                            else if (value is string strVal)
+                            {
+                                await _client.ExecCommandAsync(path, stringValue: strVal, ct: ct);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"Command '{path}' exec error: {ex.Message}");
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                Log($"Command drain error: {ex.Message}");
+                await Task.Delay(100, ct);
+            }
+        }
+    }
+
     private async Task KeepAlivePollLoopAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested && _client != null)
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(15), ct);
+                await Task.Delay(TimeSpan.FromSeconds(20), ct);
                 if (_client == null || ct.IsCancellationRequested) break;
 
                 var snapshot = await _client.GetInitialStatesAsync(new[] { "power", "volume", "playback_control.audio_format" }, ct);
@@ -310,88 +376,73 @@ public sealed class BraviaEngine : IDisposable
         }
     }
 
-    public async Task<bool> SetVolumeAsync(int volume)
+    public Task<bool> SetVolumeAsync(int volume)
     {
-        if (_client == null) return false;
-        try
+        volume = Math.Clamp(volume, 0, 100);
+        lock (_stateLock)
         {
-            await _client.ExecCommandAsync("volume", intValue: volume, ct: _cts.Token);
-            ApplyDelta("volume", volume);
-            return true;
+            if (!_currentState.Power || _currentState.Volume == volume) return Task.FromResult(false);
+            _currentState = _currentState with { Volume = volume, Mute = false };
+            StateChanged?.Invoke(_currentState);
         }
-        catch (Exception ex)
-        {
-            Log($"SetVolume error: {ex.Message}");
-            return false;
-        }
+        _cmdChannel.Writer.TryWrite(("volume", volume));
+        return Task.FromResult(true);
     }
 
-    public async Task<bool> ToggleMuteAsync()
+    public Task<bool> ToggleMuteAsync()
     {
-        if (_client == null) return false;
-        try
+        bool target;
+        lock (_stateLock)
         {
-            bool target = !CurrentState.Mute;
-            await _client.ExecCommandAsync("mute", boolValue: target, ct: _cts.Token);
-            ApplyDelta("mute", target);
-            return true;
+            if (!_currentState.Power) return Task.FromResult(false);
+            target = !_currentState.Mute;
+            _currentState = _currentState with { Mute = target };
+            StateChanged?.Invoke(_currentState);
         }
-        catch (Exception ex)
-        {
-            Log($"ToggleMute error: {ex.Message}");
-            return false;
-        }
+        _cmdChannel.Writer.TryWrite(("mute", target));
+        return Task.FromResult(true);
     }
 
-    public async Task<bool> ToggleNightModeAsync()
+    public Task<bool> ToggleNightModeAsync()
     {
-        if (_client == null) return false;
-        try
+        bool target;
+        lock (_stateLock)
         {
-            bool target = !CurrentState.NightMode;
-            await _client.ExecCommandAsync("sound_setting.night_mode", boolValue: target, ct: _cts.Token);
-            ApplyDelta("sound_setting.night_mode", target);
-            return true;
+            if (!_currentState.Power) return Task.FromResult(false);
+            target = !_currentState.NightMode;
+            _currentState = _currentState with { NightMode = target };
+            StateChanged?.Invoke(_currentState);
         }
-        catch (Exception ex)
-        {
-            Log($"ToggleNightMode error: {ex.Message}");
-            return false;
-        }
+        _cmdChannel.Writer.TryWrite(("sound_setting.night_mode", target));
+        return Task.FromResult(true);
     }
 
-    public async Task<bool> ToggleSoundFieldAsync()
+    public Task<bool> ToggleSoundFieldAsync()
     {
-        if (_client == null) return false;
-        try
+        bool target;
+        lock (_stateLock)
         {
-            bool target = !CurrentState.SoundField;
-            await _client.ExecCommandAsync("sound_setting.sound_field", boolValue: target, ct: _cts.Token);
-            ApplyDelta("sound_setting.sound_field", target);
-            return true;
+            if (!_currentState.Power) return Task.FromResult(false);
+            target = !_currentState.SoundField;
+            _currentState = _currentState with { SoundField = target };
+            StateChanged?.Invoke(_currentState);
         }
-        catch (Exception ex)
-        {
-            Log($"ToggleSoundField error: {ex.Message}");
-            return false;
-        }
+        _cmdChannel.Writer.TryWrite(("sound_setting.sound_field", target));
+        return Task.FromResult(true);
     }
 
-    public async Task<bool> TogglePowerAsync()
+    public Task<bool> TogglePowerAsync()
     {
-        if (_client == null) return false;
-        try
+        bool target;
+        lock (_stateLock)
         {
-            bool target = !CurrentState.Power;
-            await _client.ExecCommandAsync("power", boolValue: target, ct: _cts.Token);
-            ApplyDelta("power", target);
-            return true;
+            target = !_currentState.Power;
+            _currentState = _currentState with { Power = target };
+            if (target) _currentState = _currentState with { Mute = false };
+            StateChanged?.Invoke(_currentState);
         }
-        catch (Exception ex)
-        {
-            Log($"TogglePower error: {ex.Message}");
-            return false;
-        }
+        _cmdChannel.Writer.TryWrite(("power", target));
+        return Task.FromResult(true);
     }
 
     public void Dispose()
