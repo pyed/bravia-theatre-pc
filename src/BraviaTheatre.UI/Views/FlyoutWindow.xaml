@@ -293,17 +293,22 @@
                         </Border>
                     </DockPanel>
 
-                    <!-- Row 3: Optional Rear Speaker Level (Toggled via Settings) -->
-                    <DockPanel x:Name="PanelRearSpeaker" Grid.Row="3" Margin="0,6,0,0" Visibility="Collapsed">
-                        <TextBlock Text="Rear Level" Foreground="#888888" FontSize="11" FontWeight="Medium" VerticalAlignment="Center"/>
-                        <Border Background="#1C1C1C" BorderBrush="#333333" BorderThickness="1" CornerRadius="5" Padding="2" HorizontalAlignment="Right">
-                            <StackPanel Orientation="Horizontal">
-                                <Button x:Name="BtnRearMin" Content="MIN" Style="{StaticResource SegmentBtn}" Click="BtnRearMin_Click"/>
-                                <Button x:Name="BtnRearMid" Content="MID" Style="{StaticResource SegmentBtn}" Click="BtnRearMid_Click"/>
-                                <Button x:Name="BtnRearMax" Content="MAX" Style="{StaticResource SegmentBtn}" Click="BtnRearMax_Click"/>
-                            </StackPanel>
-                        </Border>
-                    </DockPanel>
+                    <!-- Row 3: Optional Rear Speaker Level Slider (-10 to +10) -->
+                    <Grid x:Name="PanelRearSpeaker" Grid.Row="3" Margin="0,8,0,0" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <DockPanel Grid.Row="0" Margin="0,0,0,4">
+                            <TextBlock Text="Rear Speakers Level" Foreground="#888888" FontSize="11" FontWeight="Medium" VerticalAlignment="Center"/>
+                            <Border Background="#1C1C1C" CornerRadius="4" Padding="6,1" HorizontalAlignment="Right">
+                                <TextBlock x:Name="TxtRearValue" Text="0" Foreground="#4CC2FF" FontSize="11" FontWeight="Bold"/>
+                            </Border>
+                        </DockPanel>
+
+                        <Slider x:Name="SliderRear" Grid.Row="1" Minimum="-10" Maximum="10" SmallChange="1" LargeChange="2" IsSnapToTickEnabled="True" TickFrequency="1" Style="{StaticResource FluentSlider}" Value="0" ValueChanged="SliderRear_ValueChanged"/>
+                    </Grid>
                 </Grid>
             </Border>
 

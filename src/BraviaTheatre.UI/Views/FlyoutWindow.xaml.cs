@@ -26,8 +26,9 @@ public partial class FlyoutWindow : Window
     private static readonly SolidColorBrush LightGrayBrush = new((Color)ColorConverter.ConvertFromString("#D0D0D0"));
     private static readonly SolidColorBrush RedBrush = new((Color)ColorConverter.ConvertFromString("#E81123"));
 
-    private static readonly Geometry SpeakerUnmutedGeometry = Geometry.Parse("M3,9v6h4l5,5V4L7,9H3z M16.5,12c0-1.77-1.02-3.29-2.5-4.03v8.05C15.48,15.29,16.5,13.77,16.5,12z M14,3.23v2.06c2.89,0.86,5,3.54,5,6.71s-2.11,5.85-5,6.71v2.06c4.01-0.91,7-4.49,7-8.77S18.01,4.14,14,3.23z");
-    private static readonly Geometry SpeakerMutedGeometry = Geometry.Parse("M3,9v6h4l5,5V4L7,9H3z M21.71,7.71L20.29,6.29 17.5,9.09 14.71,6.29 13.29,7.71 16.09,10.5 13.29,13.29 14.71,14.71 17.5,11.91 20.29,14.71 21.71,13.29 18.91,10.5z");
+    // Centered 24x24 SVG geometries with exact alignment
+    private static readonly Geometry SpeakerUnmutedGeometry = Geometry.Parse("M2,8v8h4l6,5V3L6,8H2z M16.5,8c.9,1.1 1.5,2.5 1.5,4s-.6,2.9-1.5,4l-1.5-1.5c.6-.7 1-1.6 1-2.5s-.4-1.8-1-2.5L16.5,8z M19,5.5c1.9,1.7 3,4 3,6.5s-1.1,4.8-3,6.5l-1.5-1.5c1.5-1.3 2.5-3.1 2.5-5s-1-3.7-2.5-5L19,5.5z");
+    private static readonly Geometry SpeakerMutedGeometry = Geometry.Parse("M2,8v8h4l6,5V3L6,8H2z M15.4,9.4L18,12l-2.6,2.6 1.4,1.4 2.6-2.6 2.6,2.6 1.4-1.4L20.8,12l2.6-2.6-1.4-1.4-2.6,2.6-2.6-2.6-1.4,1.4z");
 
     public FlyoutWindow(BraviaEngine engine, AppSettings settings, Action onOpenSettings)
     {
@@ -139,7 +140,10 @@ public partial class FlyoutWindow : Window
             IconSpeaker.Fill = LightGrayBrush;
 
             UpdateBassPills(state.Bass);
-            UpdateRearPills(state.RearLevel);
+
+            SliderRear.Value = state.RearLevel;
+            TxtRearValue.Text = state.RearLevel > 0 ? $"+{state.RearLevel}" : state.RearLevel.ToString();
+            SliderRear.IsEnabled = state.Power;
 
             TxtSoundFieldStatus.Text = state.SoundField ? "On" : "Off";
             TxtSoundFieldStatus.Foreground = state.SoundField ? BlueBrush : GrayBrush;
@@ -167,13 +171,6 @@ public partial class FlyoutWindow : Window
         ApplySegmentStyle(BtnBassMax, bass == "max");
     }
 
-    private void UpdateRearPills(int rear)
-    {
-        ApplySegmentStyle(BtnRearMin, rear < 0);
-        ApplySegmentStyle(BtnRearMid, rear == 0);
-        ApplySegmentStyle(BtnRearMax, rear > 0);
-    }
-
     private void ApplySegmentStyle(Button btn, bool active)
     {
         if (btn == null) return;
@@ -187,6 +184,14 @@ public partial class FlyoutWindow : Window
         int vol = (int)Math.Round(e.NewValue);
         TxtVolumeValue.Text = vol.ToString();
         _ = _engine.SetVolumeAsync(vol);
+    }
+
+    private void SliderRear_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_isUpdatingUi || TxtRearValue == null || _engine == null) return;
+        int val = (int)Math.Round(e.NewValue);
+        TxtRearValue.Text = val > 0 ? $"+{val}" : val.ToString();
+        _ = _engine.SetRearLevelAsync(val);
     }
 
     private void BorderVolume_MouseWheel(object sender, MouseWheelEventArgs e)
@@ -222,24 +227,6 @@ public partial class FlyoutWindow : Window
         _ = _engine.SetBassAsync("max");
     }
 
-    private void BtnRearMin_Click(object sender, RoutedEventArgs e)
-    {
-        UpdateRearPills(-6);
-        _ = _engine.SetRearLevelAsync(-6);
-    }
-
-    private void BtnRearMid_Click(object sender, RoutedEventArgs e)
-    {
-        UpdateRearPills(0);
-        _ = _engine.SetRearLevelAsync(0);
-    }
-
-    private void BtnRearMax_Click(object sender, RoutedEventArgs e)
-    {
-        UpdateRearPills(6);
-        _ = _engine.SetRearLevelAsync(6);
-    }
-
     private void BtnSoundField_Click(object sender, RoutedEventArgs e)
     {
         _ = _engine.ToggleSoundFieldAsync();
@@ -263,7 +250,7 @@ public partial class FlyoutWindow : Window
     private void BtnInputSource_Click(object sender, RoutedEventArgs e)
     {
         var menu = new ContextMenu();
-        string[] inputs = { "hdmi", "tv", "bluetooth", "spotify", "airplay" };
+        string[] inputs = { "hdmi", "tv", "bluetooth" };
 
         foreach (var inp in inputs)
         {
