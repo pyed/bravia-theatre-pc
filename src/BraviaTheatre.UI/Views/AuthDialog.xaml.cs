@@ -1,8 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Net.Http;
-using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows;
 using BraviaTheatre.Core.Auth;
 
@@ -10,11 +9,9 @@ namespace BraviaTheatre.UI.Views;
 
 public partial class AuthDialog : Window
 {
-    private const string ClientId = "b9795d31-4179-43c3-8f04-94cb5c8a4dfa";
-    private const string RedirectUri = "ssh-app://signin";
-    private const string Scope = "openid,profile";
-
     private readonly string _keysPath;
+    private string? _codeVerifier;
+    private string? _expectedState;
 
     public AuthDialog(string keysPath)
     {
@@ -24,11 +21,21 @@ public partial class AuthDialog : Window
 
     private void BtnOpenBrowser_Click(object sender, RoutedEventArgs e)
     {
-        var authUrl = $"https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/authorize?response_type=code&client_id={ClientId}&redirect_uri={Uri.EscapeDataString(RedirectUri)}&scope={Uri.EscapeDataString(Scope)}";
-        Process.Start(new ProcessStartInfo(authUrl) { UseShellExecute = true });
+        try
+        {
+            var (authUrl, codeVerifier, state) = SonyOAuth.StartOAuthLogin();
+            _codeVerifier = codeVerifier;
+            _expectedState = state;
+
+            Process.Start(new ProcessStartInfo(authUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to launch sign-in URL: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
-    private void BtnComplete_Click(object sender, RoutedEventArgs e)
+    private async void BtnComplete_Click(object sender, RoutedEventArgs e)
     {
         var input = TxtAuthCode.Text.Trim();
         if (string.IsNullOrEmpty(input))
@@ -37,28 +44,18 @@ public partial class AuthDialog : Window
             return;
         }
 
-        string code = input;
-        if (input.Contains("code="))
+        if (string.IsNullOrEmpty(_codeVerifier))
         {
-            var uri = new Uri(input.Replace("ssh-app://", "https://"));
-            var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
-            code = query.Get("code") ?? input;
+            MessageBox.Show("Please click 'Open Sony Sign-In in Browser' first to begin the login session.", "Session Required", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
         }
 
         BtnComplete.IsEnabled = false;
-        BtnComplete.Content = "Authenticating...";
+        BtnComplete.Content = "Exchanging Keys...";
 
         try
         {
-            // If existing session keys file exists, load hmac key; otherwise create template
-            var creds = SonyCredentials.LoadFromFile(_keysPath) ?? new SonyCredentials
-            {
-                ClientId = ClientId,
-                SessionId = Guid.NewGuid().ToString(),
-                ***REMOVED***
-            };
-
-            creds.AccessToken = code;
+            var creds = await SonyOAuth.CompleteOAuthFlowAsync(input, _codeVerifier, _expectedState);
             creds.SaveToFile(_keysPath);
 
             DialogResult = true;
@@ -66,7 +63,7 @@ public partial class AuthDialog : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Failed to save credentials: {ex.Message}", "Authentication Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"Authentication and key exchange failed:\n\n{ex.Message}", "Authentication Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
