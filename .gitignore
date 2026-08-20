@@ -1,0 +1,30 @@
+# Secrets & authentication keys (never commit personal Sony keys!)
+session_keys.json
+*.key
+
+# Logs
+*.log
+bravia_tray.log
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.spec
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE & OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
