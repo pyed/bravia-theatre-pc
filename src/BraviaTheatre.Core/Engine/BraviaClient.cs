@@ -130,7 +130,8 @@ public sealed class BraviaClient : IDisposable
             }
             catch (Exception ex)
             {
-                LogAction?.Invoke($"GetSingleStateAsync('{path}') error: {ex.Message}");
+                // Unavailable or unsupported path (e.g. no rear speakers)
+                LogAction?.Invoke($"[Query] Path '{path}' unavailable: {ex.Message}");
             }
         }
         return result;

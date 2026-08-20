@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using BraviaTheatre.Core.Auth;
 using BraviaTheatre.Core.Engine;
 using BraviaTheatre.Core.Models;
+using BraviaTheatre.UI.Models;
 using BraviaTheatre.UI.Services;
 using BraviaTheatre.UI.Views;
 
@@ -20,10 +21,10 @@ public partial class App : Application
     private BraviaEngine? _engine;
     private FlyoutWindow? _flyout;
     private NativeTrayIcon? _trayIcon;
+    private GlobalHotkeyService? _hotkeyService;
+    private AppSettings _settings = new();
 
     private MenuItem? _headerMenuItem;
-    private MenuItem? _autoStartMenuItem;
-    private MenuItem? _promoteMenuItem;
 
     private string _keysPath = "session_keys.json";
     private static readonly object _logLock = new();
@@ -76,6 +77,8 @@ public partial class App : Application
             return;
         }
 
+        _settings = AppSettings.Load();
+
         // Locate session_keys.json
         var baseDir = AppDomain.CurrentDomain.BaseDirectory;
         _keysPath = Path.Combine(baseDir, "session_keys.json");
@@ -114,36 +117,9 @@ public partial class App : Application
 
         Log("Credentials loaded successfully.");
 
-        // Optional config.json
-        string? host = null;
-        int port = 55051;
-        var configPath = Path.Combine(baseDir, "config.json");
-        if (!File.Exists(configPath))
-        {
-            var parentConfig = Path.Combine(baseDir, "..", "..", "..", "config.json");
-            if (File.Exists(parentConfig)) configPath = Path.GetFullPath(parentConfig);
-        }
-
-        if (File.Exists(configPath))
-        {
-            try
-            {
-                var doc = JsonDocument.Parse(File.ReadAllText(configPath));
-                if (doc.RootElement.TryGetProperty("host", out var hProp) && !string.IsNullOrEmpty(hProp.GetString()))
-                {
-                    host = hProp.GetString();
-                }
-                if (doc.RootElement.TryGetProperty("port", out var pProp))
-                {
-                    port = pProp.GetInt32();
-                }
-                Log($"Config loaded: Host={host}, Port={port}");
-            }
-            catch (Exception ex)
-            {
-                Log($"Config read error: {ex.Message}");
-            }
-        }
+        // Static host/port from settings or config.json
+        string? host = string.IsNullOrWhiteSpace(_settings.StaticHost) ? null : _settings.StaticHost;
+        int port = _settings.StaticPort > 0 ? _settings.StaticPort : 55051;
 
         // Initialize Core Engine
         _engine = new BraviaEngine(creds, host, port)
@@ -152,7 +128,22 @@ public partial class App : Application
         };
 
         // Initialize Flyout
-        _flyout = new FlyoutWindow(_engine);
+        _flyout = new FlyoutWindow(_engine, _settings, OpenSettingsWindow);
+
+        // Initialize Global Hotkeys
+        _hotkeyService = new GlobalHotkeyService(_engine);
+        if (_settings.EnableGlobalHotkeys)
+        {
+            try
+            {
+                _hotkeyService.Register();
+                Log("Global hotkeys registered.");
+            }
+            catch (Exception ex)
+            {
+                Log($"Hotkey registration warning: {ex.Message}");
+            }
+        }
 
         // Initialize System Tray
         InitializeTray();
@@ -191,33 +182,9 @@ public partial class App : Application
 
         menu.Items.Add(new Separator());
 
-        _autoStartMenuItem = new MenuItem
-        {
-            Header = "Start with Windows",
-            IsCheckable = true,
-            IsChecked = AutoStartService.IsAutoStartEnabled()
-        };
-        _autoStartMenuItem.Click += (s, e) =>
-        {
-            bool next = !AutoStartService.IsAutoStartEnabled();
-            AutoStartService.SetAutoStart(next);
-            _autoStartMenuItem.IsChecked = next;
-        };
-        menu.Items.Add(_autoStartMenuItem);
-
-        _promoteMenuItem = new MenuItem
-        {
-            Header = "Always show on taskbar",
-            IsCheckable = true,
-            IsChecked = AutoStartService.IsTrayPromoted()
-        };
-        _promoteMenuItem.Click += (s, e) =>
-        {
-            bool next = !AutoStartService.IsTrayPromoted();
-            AutoStartService.SetTrayPromoted(next);
-            _promoteMenuItem.IsChecked = next;
-        };
-        menu.Items.Add(_promoteMenuItem);
+        var settingsItem = new MenuItem { Header = "Settings…" };
+        settingsItem.Click += (s, e) => OpenSettingsWindow();
+        menu.Items.Add(settingsItem);
 
         var setupItem = new MenuItem { Header = "Sony Account Setup…" };
         setupItem.Click += (s, e) =>
@@ -238,9 +205,35 @@ public partial class App : Application
         Log("Native System Tray Icon shown.");
     }
 
+    private void OpenSettingsWindow()
+    {
+        var win = new SettingsWindow(_settings, () =>
+        {
+            var authDlg = new AuthDialog(_keysPath);
+            authDlg.ShowDialog();
+        });
+
+        win.SettingsSaved += (updated) =>
+        {
+            _settings = updated;
+            _flyout?.ApplySettings(_settings);
+
+            if (_settings.EnableGlobalHotkeys)
+            {
+                _hotkeyService?.Register();
+            }
+            else
+            {
+                _hotkeyService?.Unregister();
+            }
+        };
+
+        win.ShowDialog();
+    }
+
     private void OnEngineStateChanged(SoundbarState state)
     {
-        Log($"State updated: Connected={state.Connected}, Power={state.Power}, Vol={state.Volume}, Codec={state.Codec}, Ch={state.Channel}");
+        Log($"State updated: Connected={state.Connected}, Power={state.Power}, Vol={state.Volume}, Codec={state.Codec}, Ch={state.Channel}, Voice={state.VoiceMode}, Inp={state.Function}");
         Dispatcher.BeginInvoke(() =>
         {
             if (_trayIcon != null)
@@ -260,6 +253,7 @@ public partial class App : Application
     private void ShutdownApp()
     {
         Log("Shutting down application.");
+        _hotkeyService?.Dispose();
         _engine?.Dispose();
         _trayIcon?.Dispose();
         _singleInstanceMutex?.ReleaseMutex();
@@ -270,6 +264,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Log("Application exited.");
+        _hotkeyService?.Dispose();
         _engine?.Dispose();
         _trayIcon?.Dispose();
         _singleInstanceMutex?.Dispose();

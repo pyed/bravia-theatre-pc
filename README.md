@@ -29,11 +29,21 @@ All communication occurs locally over Sony's encrypted gRPC protocol (port 55051
   - **Sony 360 Reality Audio & AAC**
   - **Standby & Idle Indicators**
 - **Windows 11 Fluent Quick Settings Flyout:**
-  - **Native Windows 11 Sound Slider:** Custom halo thumb, Fluent Blue fill (`#4CC2FF`), click-to-point track jumping, and mouse-wheel scrolling.
-  - **3-Way Bass Level Selector:** Compact segmented pill control (`MIN` | `MID` | `MAX`) for instant subwoofer level calibration.
+  - **Native Windows 11 Sound Slider & Mute Icon:** Custom halo thumb, Fluent Blue fill (`#4CC2FF`), click-to-point track jumping, mouse-wheel scrolling, and Windows speaker/mute icon (`Speaker + X`).
+  - **Interactive Input Source Selector:** Switch active soundbar input on the fly (`HDMI`, `TV`, `Bluetooth`, `Spotify`, `AirPlay`).
+  - **Compact Connection Indicator Dot:** Glowing status indicator with hover tooltips (`Online`, `Standby`, `Connecting`).
+  - **3-Way Bass Level Selector:** Compact segmented pill control (`MIN` | `MID` | `MAX`) for instant subwoofer calibration.
+  - **Optional Rear Speaker Control:** Toggled via Settings for systems paired with SA-RS3S / SA-RS5 surround speakers.
   - **Active Audio Hero Card:** Detailed bitstream format, audio channel layout (e.g., 7.1, 5.1.2, 2.0), and physical input source (eARC / HDMI).
-  - **Quick Action Tiles:** Toggle 360 Spatial Sound Mapping (Sound Field), Night Mode, Power, and Mute with instant visual feedback.
-  - **Adaptive Tray Positioning:** Automatic alignment above the Windows taskbar with smooth click-away dismissal.
+  - **Quick Action Tiles:** Toggle 360 Spatial Sound Mapping (Sound Field), Night Mode, Voice Mode, and Power with instant visual feedback.
+- **Configurable Global Keyboard Shortcuts:**
+  - `Win + Alt + Up`: Volume Up (+2)
+  - `Win + Alt + Down`: Volume Down (-2)
+  - `Win + Alt + M`: Toggle Mute
+  - `Win + Alt + S`: Toggle Sound Field
+  - `Win + Alt + V`: Toggle Voice Mode
+  - `Win + Alt + N`: Toggle Night Mode
+- **Dedicated Settings Window:** Windows 11 Fluent dialog for startup configuration, taskbar icon persistence, optional rear speakers, and hotkey toggles.
 - **High-Performance Non-Blocking Architecture:**
   - Background asynchronous command queuing with volume coalescing to prevent network bottlenecking during rapid slider movement.
   - Pure Win32 `Shell_NotifyIconW` integration with automatic explorer recovery upon `TaskbarCreated` messages.

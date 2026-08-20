@@ -8,7 +8,10 @@ public sealed record SoundbarState
     public bool Mute { get; init; }
     public bool NightMode { get; init; }
     public bool SoundField { get; init; }
+    public bool VoiceMode { get; init; }
     public string Bass { get; init; } = "mid";
+    public int RearLevel { get; init; } = 0;
+    public string Function { get; init; } = "hdmi";
     public string? Codec { get; init; }
     public string? Channel { get; init; }
     public string? Input { get; init; }
@@ -25,7 +28,10 @@ public sealed record SoundbarState
         Mute = false,
         NightMode = false,
         SoundField = false,
+        VoiceMode = false,
         Bass = "mid",
+        RearLevel = 0,
+        Function = "hdmi",
         Codec = null,
         Channel = null,
         Input = null,
