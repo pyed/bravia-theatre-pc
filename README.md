@@ -60,7 +60,7 @@ All communication occurs locally over Sony's encrypted gRPC protocol (port 55051
 
 ### Option 2: Running from Source
 
-**Prerequisites:** Python 3.10 or higher.
+**Prerequisites:** Python 3.12 or higher.
 
 1. Clone the repository and install required dependencies:
    ```bat
