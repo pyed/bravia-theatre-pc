@@ -8,17 +8,19 @@ public static class CommandBuilder
 {
     private static byte[] BuildEmbeddedSessionBlock(byte[] sessionRandom, string sessionId)
     {
+        var sessionIdBytes = Encoding.UTF8.GetBytes(sessionId);
         using var ms = new MemoryStream();
-        // field 1: session_random (bytes)
-        var f1 = ProtobufWireCodec.LengthDelimited(1, sessionRandom);
-        ms.Write(f1, 0, f1.Length);
+        
+        // Field 1 (0x0A): session_random
+        var fRand = ProtobufWireCodec.LengthDelimited(1, sessionRandom);
+        ms.Write(fRand, 0, fRand.Length);
 
-        // field 2: session_id (string)
-        var idBytes = Encoding.UTF8.GetBytes(sessionId);
-        var f2 = ProtobufWireCodec.LengthDelimited(2, idBytes);
-        ms.Write(f2, 0, f2.Length);
+        // Field 3 (0x1A): session_id
+        var fId = ProtobufWireCodec.LengthDelimited(3, sessionIdBytes);
+        ms.Write(fId, 0, fId.Length);
 
         var inner = ms.ToArray();
+        // Embedded session is field 2 (0x12) of top-level command block
         return ProtobufWireCodec.LengthDelimited(2, inner);
     }
 
@@ -30,18 +32,18 @@ public static class CommandBuilder
             var inner = new byte[1 + valBytes.Length];
             inner[0] = 0x08;
             Buffer.BlockCopy(valBytes, 0, inner, 1, valBytes.Length);
-            return ProtobufWireCodec.LengthDelimited(2, inner);
+            return ProtobufWireCodec.LengthDelimited(4, inner); // Field 4 (0x22)
         }
         if (boolValue.HasValue)
         {
             var inner = new byte[] { 0x08, (byte)(boolValue.Value ? 0x01 : 0x00) };
-            return ProtobufWireCodec.LengthDelimited(3, inner);
+            return ProtobufWireCodec.LengthDelimited(5, inner); // Field 5 (0x2A)
         }
         if (!string.IsNullOrEmpty(stringValue))
         {
             var strBytes = Encoding.UTF8.GetBytes(stringValue);
             var inner = ProtobufWireCodec.LengthDelimited(1, strBytes);
-            return ProtobufWireCodec.LengthDelimited(4, inner);
+            return ProtobufWireCodec.LengthDelimited(6, inner); // Field 6 (0x32)
         }
 
         throw new ArgumentException("Must specify exactly one value (int, bool, or string)");
@@ -107,6 +109,6 @@ public static class CommandBuilder
 
     public static bool ParseExecResponse(ReadOnlySpan<byte> raw)
     {
-        return raw.Length == 2 && raw[0] == 0x08 && raw[1] == 0x01;
+        return (raw.Length == 2 && raw[0] == 0x08 && raw[1] == 0x01) || raw.Length == 0;
     }
 }

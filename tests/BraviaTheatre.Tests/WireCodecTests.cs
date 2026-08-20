@@ -110,4 +110,18 @@ public class WireCodecTests
 
         Assert.Equal(expectedHex, Convert.ToHexString(bytes).ToLowerInvariant());
     }
+
+    [Fact]
+    public void TestBuildExecCommandRequest()
+    {
+        var path = "volume";
+        var rnd = Convert.FromHexString("0102030405060708");
+        var sid = "7491d78d-d09b-4648-a791-116a50ccc90a";
+        var key = "***REMOVED***";
+
+        var bytes = CommandBuilder.BuildExecCommandRequest(key, path, rnd, sid, intValue: 37);
+        var expectedHex = "0a680a440a100a0e0a06766f6c756d6510012202082512300a0801020304050607081a2437343931643738642d643039622d343634382d613739312d3131366135306363633930611220330b311a6a188542406192348bc68dd29e2188b2eba9947623463ddd7661ff58";
+
+        Assert.Equal(expectedHex, Convert.ToHexString(bytes).ToLowerInvariant());
+    }
 }

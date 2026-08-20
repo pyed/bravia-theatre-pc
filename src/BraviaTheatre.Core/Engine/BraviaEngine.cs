@@ -332,8 +332,8 @@ public sealed class BraviaEngine : IDisposable
         try
         {
             bool target = !CurrentState.Mute;
-            await _client.ExecCommandAsync("mute", stringValue: target ? "on" : "off", ct: _cts.Token);
-            ApplyDelta("mute", target ? "on" : "off");
+            await _client.ExecCommandAsync("mute", boolValue: target, ct: _cts.Token);
+            ApplyDelta("mute", target);
             return true;
         }
         catch (Exception ex)
@@ -349,8 +349,8 @@ public sealed class BraviaEngine : IDisposable
         try
         {
             bool target = !CurrentState.NightMode;
-            await _client.ExecCommandAsync("sound_setting.night_mode", stringValue: target ? "on" : "off", ct: _cts.Token);
-            ApplyDelta("sound_setting.night_mode", target ? "on" : "off");
+            await _client.ExecCommandAsync("sound_setting.night_mode", boolValue: target, ct: _cts.Token);
+            ApplyDelta("sound_setting.night_mode", target);
             return true;
         }
         catch (Exception ex)
@@ -366,8 +366,8 @@ public sealed class BraviaEngine : IDisposable
         try
         {
             bool target = !CurrentState.SoundField;
-            await _client.ExecCommandAsync("sound_setting.sound_field", stringValue: target ? "on" : "off", ct: _cts.Token);
-            ApplyDelta("sound_setting.sound_field", target ? "on" : "off");
+            await _client.ExecCommandAsync("sound_setting.sound_field", boolValue: target, ct: _cts.Token);
+            ApplyDelta("sound_setting.sound_field", target);
             return true;
         }
         catch (Exception ex)
@@ -383,8 +383,8 @@ public sealed class BraviaEngine : IDisposable
         try
         {
             bool target = !CurrentState.Power;
-            await _client.ExecCommandAsync("power", stringValue: target ? "active" : "off", ct: _cts.Token);
-            ApplyDelta("power", target ? "on" : "off");
+            await _client.ExecCommandAsync("power", boolValue: target, ct: _cts.Token);
+            ApplyDelta("power", target);
             return true;
         }
         catch (Exception ex)
