@@ -27,16 +27,45 @@ public partial class App : Application
 
     private string _keysPath = "session_keys.json";
 
+    public static void Log(string message)
+    {
+        try
+        {
+            var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}";
+            File.AppendAllText("bravia_csharp.log", line + Environment.NewLine);
+        }
+        catch
+        {
+            // Ignore logging errors
+        }
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         // Prevent application from closing when modal dialogs close
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+        AppDomain.CurrentDomain.UnhandledException += (s, args) =>
+        {
+            Log($"FATAL UNHANDLED EXCEPTION: {args.ExceptionObject}");
+            MessageBox.Show($"Fatal error:\n\n{args.ExceptionObject}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        };
+
+        DispatcherUnhandledException += (s, args) =>
+        {
+            Log($"DISPATCHER UNHANDLED EXCEPTION: {args.Exception}");
+            MessageBox.Show($"Dispatcher error:\n\n{args.Exception.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            args.Handled = true;
+        };
+
+        Log("Application starting...");
 
         base.OnStartup(e);
 
         _singleInstanceMutex = new Mutex(true, MutexName, out bool createdNew);
         if (!createdNew)
         {
+            Log("Another instance is already running.");
             MessageBox.Show("BRAVIA Theatre PC is already running in the system tray.", "Already Running", MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown();
             return;
@@ -53,26 +82,32 @@ public partial class App : Application
                 _keysPath = Path.GetFullPath(parentKeys);
             }
         }
+        Log($"Using session keys path: {_keysPath}");
 
         var creds = SonyCredentials.LoadFromFile(_keysPath);
-        if (creds == null)
+        if (creds == null || string.IsNullOrEmpty(creds.HmacKey))
         {
+            Log("Credentials not found or missing HmacKey. Opening AuthDialog...");
             var authDlg = new AuthDialog(_keysPath);
             var result = authDlg.ShowDialog();
             if (result != true)
             {
+                Log("AuthDialog cancelled. Shutting down.");
                 Shutdown();
                 return;
             }
             creds = SonyCredentials.LoadFromFile(_keysPath);
         }
 
-        if (creds == null)
+        if (creds == null || string.IsNullOrEmpty(creds.HmacKey))
         {
+            Log("No valid credentials after AuthDialog. Shutting down.");
             MessageBox.Show("Valid Sony credentials are required to run.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown();
             return;
         }
+
+        Log("Credentials loaded successfully.");
 
         // Optional config.json
         string? host = null;
@@ -97,10 +132,11 @@ public partial class App : Application
                 {
                     port = pProp.GetInt32();
                 }
+                Log($"Config loaded: Host={host}, Port={port}");
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore config error
+                Log($"Config read error: {ex.Message}");
             }
         }
 
@@ -115,13 +151,19 @@ public partial class App : Application
 
         _engine.StateChanged += OnEngineStateChanged;
         _engine.Start();
+        Log("Engine started and running in system tray.");
     }
 
     private void InitializeTray()
     {
+        Log("Initializing Native System Tray Icon...");
         _trayIcon = new NativeTrayIcon
         {
-            LeftClickAction = () => _flyout?.ToggleFlyout()
+            LeftClickAction = () =>
+            {
+                Log("Tray left-clicked. Toggling flyout...");
+                _flyout?.ToggleFlyout();
+            }
         };
 
         // Right-click context menu
@@ -185,10 +227,12 @@ public partial class App : Application
 
         _trayIcon.ContextMenu = menu;
         _trayIcon.Show(IconHelper.GetTrayIcon("idle"), "BRAVIA Theatre PC");
+        Log("Native System Tray Icon shown.");
     }
 
     private void OnEngineStateChanged(SoundbarState state)
     {
+        Log($"State updated: Connected={state.Connected}, Power={state.Power}, Vol={state.Volume}, Codec={state.Codec}, Ch={state.Channel}");
         Dispatcher.Invoke(() =>
         {
             if (_trayIcon != null)
@@ -207,6 +251,7 @@ public partial class App : Application
 
     private void ShutdownApp()
     {
+        Log("Shutting down application.");
         _engine?.Dispose();
         _trayIcon?.Dispose();
         _singleInstanceMutex?.ReleaseMutex();
@@ -216,6 +261,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        Log("Application exited.");
         _engine?.Dispose();
         _trayIcon?.Dispose();
         _singleInstanceMutex?.Dispose();

@@ -109,7 +109,7 @@ public partial class FlyoutWindow : Window
 
     private void SliderVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_isUpdatingUi) return;
+        if (_isUpdatingUi || TxtVolumeValue == null || _engine == null) return;
         int vol = (int)Math.Round(e.NewValue);
         TxtVolumeValue.Text = vol.ToString();
         _ = _engine.SetVolumeAsync(vol);
