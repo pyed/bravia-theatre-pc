@@ -22,15 +22,28 @@ public sealed class AppSettings
     public string? StaticHost { get; set; } = "";
     public int StaticPort { get; set; } = 55051;
 
-    private static readonly string SettingsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.json");
+    private static string GetSettingsFilePath()
+    {
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppDomain.CurrentDomain.BaseDirectory;
+        var localPath = Path.Combine(exeDir, "settings.json");
+        if (File.Exists(localPath)) return localPath;
+
+        var appDataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BraviaTheatrePC");
+        if (!Directory.Exists(appDataDir))
+        {
+            try { Directory.CreateDirectory(appDataDir); } catch { }
+        }
+        return Path.Combine(appDataDir, "settings.json");
+    }
 
     public static AppSettings Load()
     {
         try
         {
-            if (File.Exists(SettingsPath))
+            var path = GetSettingsFilePath();
+            if (File.Exists(path))
             {
-                var json = File.ReadAllText(SettingsPath);
+                var json = File.ReadAllText(path);
                 var loaded = JsonSerializer.Deserialize<AppSettings>(json);
                 if (loaded != null) return loaded;
             }
@@ -44,8 +57,9 @@ public sealed class AppSettings
     {
         try
         {
+            var path = GetSettingsFilePath();
             var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(SettingsPath, json);
+            File.WriteAllText(path, json);
         }
         catch { }
     }

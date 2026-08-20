@@ -66,6 +66,12 @@ public sealed class SonyCredentials
 
     public void SaveToFile(string path)
     {
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+        {
+            try { Directory.CreateDirectory(dir); } catch { }
+        }
+
         // Ensure canonical fields are set
         SessionIdRaw ??= SessionId;
         KeyIdRaw ??= SessionId;

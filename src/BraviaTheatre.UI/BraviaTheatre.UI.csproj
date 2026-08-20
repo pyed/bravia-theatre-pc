@@ -9,6 +9,8 @@
     <RootNamespace>BraviaTheatre.UI</RootNamespace>
     <AssemblyName>BraviaTheatrePC</AssemblyName>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
   </PropertyGroup>
 
   <ItemGroup>

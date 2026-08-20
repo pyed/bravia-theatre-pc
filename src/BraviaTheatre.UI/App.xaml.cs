@@ -27,6 +27,16 @@ public partial class App : Application
     private MenuItem? _headerMenuItem;
 
     private string _keysPath = "session_keys.json";
+    public static string GetAppDataDir()
+    {
+        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BraviaTheatrePC");
+        if (!Directory.Exists(dir))
+        {
+            try { Directory.CreateDirectory(dir); } catch { }
+        }
+        return dir;
+    }
+
     private static readonly object _logLock = new();
     public static void Log(string message)
     {
@@ -35,7 +45,8 @@ public partial class App : Application
             try
             {
                 var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}";
-                using var stream = new FileStream("bravia_csharp.log", FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                var logPath = Path.Combine(GetAppDataDir(), "bravia_csharp.log");
+                using var stream = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
                 using var writer = new StreamWriter(stream);
                 writer.WriteLine(line);
             }
@@ -79,15 +90,29 @@ public partial class App : Application
 
         _settings = AppSettings.Load();
 
-        // Locate session_keys.json
-        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        _keysPath = Path.Combine(baseDir, "session_keys.json");
-        if (!File.Exists(_keysPath))
+        // Locate session_keys.json (check next to EXE first, then AppData, then dev parent)
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppDomain.CurrentDomain.BaseDirectory;
+        var localKeys = Path.Combine(exeDir, "session_keys.json");
+        var appDataKeys = Path.Combine(GetAppDataDir(), "session_keys.json");
+
+        if (File.Exists(localKeys))
         {
-            var parentKeys = Path.Combine(baseDir, "..", "..", "..", "session_keys.json");
+            _keysPath = localKeys;
+        }
+        else if (File.Exists(appDataKeys))
+        {
+            _keysPath = appDataKeys;
+        }
+        else
+        {
+            var parentKeys = Path.Combine(exeDir, "..", "..", "..", "session_keys.json");
             if (File.Exists(parentKeys))
             {
                 _keysPath = Path.GetFullPath(parentKeys);
+            }
+            else
+            {
+                _keysPath = appDataKeys;
             }
         }
         Log($"Using session keys path: {_keysPath}");
