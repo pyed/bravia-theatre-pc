@@ -52,6 +52,10 @@ public partial class FlyoutWindow : Window
     {
         _settings = settings;
         PanelRearSpeaker.Visibility = _settings.ShowRearSpeaker ? Visibility.Visible : Visibility.Collapsed;
+        if (IsVisible)
+        {
+            PositionNearTray();
+        }
     }
 
     public void ToggleFlyout()
@@ -64,15 +68,19 @@ public partial class FlyoutWindow : Window
         {
             PositionNearTray();
             Show();
+            PositionNearTray();
             Activate();
         }
     }
 
     public void PositionNearTray()
     {
+        UpdateLayout();
         var workArea = SystemParameters.WorkArea;
-        Left = workArea.Right - Width - 10;
-        Top = workArea.Bottom - Height - 10;
+        double w = ActualWidth > 0 ? ActualWidth : Width;
+        double h = ActualHeight > 0 ? ActualHeight : 410;
+        Left = workArea.Right - w - 10;
+        Top = workArea.Bottom - h - 10;
     }
 
     public void UpdateState(SoundbarState state)
