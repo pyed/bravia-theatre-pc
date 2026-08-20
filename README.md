@@ -37,13 +37,14 @@ All communication occurs locally over Sony's encrypted gRPC protocol (port 55051
   - **Active Audio Hero Card:** Detailed bitstream format, audio channel layout (e.g., 7.1, 5.1.2, 2.0), and physical input source (eARC / HDMI).
   - **Quick Action Tiles:** Toggle 360 Spatial Sound Mapping (Sound Field), Night Mode, Voice Mode, and Power with instant visual feedback.
 - **Configurable Global Keyboard Shortcuts:**
-  - `Win + Alt + Up`: Volume Up (+2)
-  - `Win + Alt + Down`: Volume Down (-2)
-  - `Win + Alt + M`: Toggle Mute
-  - `Win + Alt + S`: Toggle Sound Field
-  - `Win + Alt + V`: Toggle Voice Mode
-  - `Win + Alt + N`: Toggle Night Mode
-- **Dedicated Settings Window:** Windows 11 Fluent dialog for startup configuration, taskbar icon persistence, optional rear speakers, and hotkey toggles.
+  - `Ctrl + Alt + Up`: Volume Up (+2)
+  - `Ctrl + Alt + Down`: Volume Down (-2)
+  - `Ctrl + Alt + M`: Toggle Mute
+  - `Ctrl + Alt + S`: Toggle Sound Field
+  - `Ctrl + Alt + V`: Toggle Voice Mode
+  - `Ctrl + Alt + N`: Toggle Night Mode
+  - *(All shortcuts are interactively customizable in the Settings window)*
+- **Dedicated Settings Window:** Windows 11 Fluent dialog for startup configuration, taskbar icon persistence, optional rear speaker level slider, and interactive global shortcut customization.
 - **High-Performance Non-Blocking Architecture:**
   - Background asynchronous command queuing with volume coalescing to prevent network bottlenecking during rapid slider movement.
   - Pure Win32 `Shell_NotifyIconW` integration with automatic explorer recovery upon `TaskbarCreated` messages.

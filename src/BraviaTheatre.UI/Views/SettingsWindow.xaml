@@ -2,12 +2,46 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Settings - BRAVIA Theatre PC"
-        Width="440" Height="580"
+        Width="480" Height="620"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize">
+
+    <Window.Resources>
+        <Style x:Key="HotkeyBox" TargetType="TextBox">
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Width" Value="150"/>
+            <Setter Property="Background" Value="#1C1C1C"/>
+            <Setter Property="Foreground" Value="#4CC2FF"/>
+            <Setter Property="BorderBrush" Value="#383838"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="FontFamily" Value="Consolas, Segoe UI"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="6,2"/>
+            <Setter Property="TextAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="ToolTip" Value="Click and press your desired shortcut key combination"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="tb" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4">
+                            <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsFocused" Value="True">
+                                <Setter TargetName="tb" Property="BorderBrush" Value="#4CC2FF"/>
+                                <Setter TargetName="tb" Property="Background" Value="#252525"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
 
     <Border CornerRadius="12" Background="#1E1E1E" BorderBrush="#383838" BorderThickness="1" Margin="10">
         <Border.Effect>
@@ -59,47 +93,51 @@
                         <StackPanel>
                             <CheckBox x:Name="ChkStartWithWindows" Content="Start automatically with Windows" Foreground="#D0D0D0" FontSize="12.5" Margin="0,4"/>
                             <CheckBox x:Name="ChkAlwaysShowOnTaskbar" Content="Always show icon on taskbar (prevent overflow hide)" Foreground="#D0D0D0" FontSize="12.5" Margin="0,8,0,4"/>
-                            <CheckBox x:Name="ChkShowRearSpeaker" Content="Show Rear Speaker Level control" Foreground="#D0D0D0" FontSize="12.5" Margin="0,8,0,4"/>
+                            <CheckBox x:Name="ChkShowRearSpeaker" Content="Show Rear Speaker Level control (for SA-RS3S / SA-RS5)" Foreground="#D0D0D0" FontSize="12.5" Margin="0,8,0,4"/>
                         </StackPanel>
                     </Border>
 
                     <!-- Global Hotkeys Section -->
-                    <TextBlock Text="GLOBAL KEYBOARD SHORTCUTS" Foreground="#4CC2FF" FontSize="11" FontWeight="Bold" Margin="0,0,0,8"/>
+                    <DockPanel Margin="0,0,0,8">
+                        <TextBlock Text="GLOBAL KEYBOARD SHORTCUTS" Foreground="#4CC2FF" FontSize="11" FontWeight="Bold" VerticalAlignment="Center"/>
+                        <Button Content="Reset to Defaults" HorizontalAlignment="Right" Padding="8,2" FontSize="10.5" Background="#2C2C2C" Foreground="#A0A0A0" BorderBrush="#383838" BorderThickness="1" Cursor="Hand" Click="BtnResetHotkeys_Click"/>
+                    </DockPanel>
+
                     <Border Background="#262626" BorderBrush="#333333" BorderThickness="1" CornerRadius="8" Padding="14,12" Margin="0,0,0,16">
                         <StackPanel>
-                            <CheckBox x:Name="ChkEnableGlobalHotkeys" Content="Enable global hotkeys" Foreground="#FFFFFF" FontWeight="Medium" FontSize="12.5" Margin="0,0,0,10"/>
+                            <CheckBox x:Name="ChkEnableGlobalHotkeys" Content="Enable global hotkeys" Foreground="#FFFFFF" FontWeight="Medium" FontSize="12.5" Margin="0,0,0,12"/>
                             
-                            <Grid Margin="4,0,0,0">
+                            <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="130"/>
                                     <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
-                                    <RowDefinition Height="22"/>
-                                    <RowDefinition Height="22"/>
-                                    <RowDefinition Height="22"/>
-                                    <RowDefinition Height="22"/>
-                                    <RowDefinition Height="22"/>
-                                    <RowDefinition Height="22"/>
+                                    <RowDefinition Height="32"/>
+                                    <RowDefinition Height="32"/>
+                                    <RowDefinition Height="32"/>
+                                    <RowDefinition Height="32"/>
+                                    <RowDefinition Height="32"/>
+                                    <RowDefinition Height="32"/>
                                 </Grid.RowDefinitions>
 
-                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Win + Alt + Up" Foreground="#4CC2FF" FontFamily="Consolas" FontSize="11.5"/>
-                                <TextBlock Grid.Row="0" Grid.Column="1" Text="Volume Up (+2)" Foreground="#A0A0A0" FontSize="11.5"/>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Volume Up" Foreground="#D0D0D0" VerticalAlignment="Center" FontSize="12"/>
+                                <TextBox x:Name="TxtHotkeyVolUp" Grid.Row="0" Grid.Column="1" Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"/>
 
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Win + Alt + Down" Foreground="#4CC2FF" FontFamily="Consolas" FontSize="11.5"/>
-                                <TextBlock Grid.Row="1" Grid.Column="1" Text="Volume Down (-2)" Foreground="#A0A0A0" FontSize="11.5"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Volume Down" Foreground="#D0D0D0" VerticalAlignment="Center" FontSize="12"/>
+                                <TextBox x:Name="TxtHotkeyVolDown" Grid.Row="1" Grid.Column="1" Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"/>
 
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Win + Alt + M" Foreground="#4CC2FF" FontFamily="Consolas" FontSize="11.5"/>
-                                <TextBlock Grid.Row="2" Grid.Column="1" Text="Toggle Mute" Foreground="#A0A0A0" FontSize="11.5"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Toggle Mute" Foreground="#D0D0D0" VerticalAlignment="Center" FontSize="12"/>
+                                <TextBox x:Name="TxtHotkeyMute" Grid.Row="2" Grid.Column="1" Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"/>
 
-                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Win + Alt + S" Foreground="#4CC2FF" FontFamily="Consolas" FontSize="11.5"/>
-                                <TextBlock Grid.Row="3" Grid.Column="1" Text="Toggle Sound Field" Foreground="#A0A0A0" FontSize="11.5"/>
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Toggle Sound Field" Foreground="#D0D0D0" VerticalAlignment="Center" FontSize="12"/>
+                                <TextBox x:Name="TxtHotkeySoundField" Grid.Row="3" Grid.Column="1" Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"/>
 
-                                <TextBlock Grid.Row="4" Grid.Column="0" Text="Win + Alt + V" Foreground="#4CC2FF" FontFamily="Consolas" FontSize="11.5"/>
-                                <TextBlock Grid.Row="4" Grid.Column="1" Text="Toggle Voice Mode" Foreground="#A0A0A0" FontSize="11.5"/>
+                                <TextBlock Grid.Row="4" Grid.Column="0" Text="Toggle Voice Mode" Foreground="#D0D0D0" VerticalAlignment="Center" FontSize="12"/>
+                                <TextBox x:Name="TxtHotkeyVoiceMode" Grid.Row="4" Grid.Column="1" Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"/>
 
-                                <TextBlock Grid.Row="5" Grid.Column="0" Text="Win + Alt + N" Foreground="#4CC2FF" FontFamily="Consolas" FontSize="11.5"/>
-                                <TextBlock Grid.Row="5" Grid.Column="1" Text="Toggle Night Mode" Foreground="#A0A0A0" FontSize="11.5"/>
+                                <TextBlock Grid.Row="5" Grid.Column="0" Text="Toggle Night Mode" Foreground="#D0D0D0" VerticalAlignment="Center" FontSize="12"/>
+                                <TextBox x:Name="TxtHotkeyNightMode" Grid.Row="5" Grid.Column="1" Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"/>
                             </Grid>
                         </StackPanel>
                     </Border>

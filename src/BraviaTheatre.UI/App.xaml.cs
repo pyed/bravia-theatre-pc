@@ -136,7 +136,7 @@ public partial class App : Application
         {
             try
             {
-                _hotkeyService.Register();
+                _hotkeyService.Register(_settings);
                 Log("Global hotkeys registered.");
             }
             catch (Exception ex)
@@ -220,7 +220,7 @@ public partial class App : Application
 
             if (_settings.EnableGlobalHotkeys)
             {
-                _hotkeyService?.Register();
+                _hotkeyService?.Register(_settings);
             }
             else
             {

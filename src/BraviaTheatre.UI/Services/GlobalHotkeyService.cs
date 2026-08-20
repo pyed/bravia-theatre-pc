@@ -1,7 +1,9 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Windows.Input;
 using System.Windows.Interop;
 using BraviaTheatre.Core.Engine;
+using BraviaTheatre.UI.Models;
 
 namespace BraviaTheatre.UI.Services;
 
@@ -13,13 +15,6 @@ public sealed class GlobalHotkeyService : IDisposable
     private const uint MOD_SHIFT = 0x0004;
     private const uint MOD_WIN = 0x0008;
     private const uint MOD_NOREPEAT = 0x4000;
-
-    private const int VK_UP = 0x26;
-    private const int VK_DOWN = 0x28;
-    private const int VK_M = 0x4D;
-    private const int VK_S = 0x53;
-    private const int VK_V = 0x56;
-    private const int VK_N = 0x4E;
 
     private const int HOTKEY_VOL_UP = 9001;
     private const int HOTKEY_VOL_DOWN = 9002;
@@ -43,9 +38,11 @@ public sealed class GlobalHotkeyService : IDisposable
         _engine = engine;
     }
 
-    public void Register()
+    public void Register(AppSettings settings)
     {
-        if (_isRegistered) return;
+        Unregister();
+
+        if (!settings.EnableGlobalHotkeys) return;
 
         var parameters = new HwndSourceParameters("BraviaHotkeyMsgSink")
         {
@@ -61,16 +58,73 @@ public sealed class GlobalHotkeyService : IDisposable
 
         var hwnd = _hwndSource.Handle;
 
-        uint mods = MOD_WIN | MOD_ALT | MOD_NOREPEAT;
-
-        RegisterHotKey(hwnd, HOTKEY_VOL_UP, mods, VK_UP);
-        RegisterHotKey(hwnd, HOTKEY_VOL_DOWN, mods, VK_DOWN);
-        RegisterHotKey(hwnd, HOTKEY_MUTE, mods, VK_M);
-        RegisterHotKey(hwnd, HOTKEY_SOUND_FIELD, mods, VK_S);
-        RegisterHotKey(hwnd, HOTKEY_VOICE_MODE, mods, VK_V);
-        RegisterHotKey(hwnd, HOTKEY_NIGHT_MODE, mods, VK_N);
+        RegisterSingle(hwnd, HOTKEY_VOL_UP, settings.HotkeyVolumeUp);
+        RegisterSingle(hwnd, HOTKEY_VOL_DOWN, settings.HotkeyVolumeDown);
+        RegisterSingle(hwnd, HOTKEY_MUTE, settings.HotkeyMute);
+        RegisterSingle(hwnd, HOTKEY_SOUND_FIELD, settings.HotkeySoundField);
+        RegisterSingle(hwnd, HOTKEY_VOICE_MODE, settings.HotkeyVoiceMode);
+        RegisterSingle(hwnd, HOTKEY_NIGHT_MODE, settings.HotkeyNightMode);
 
         _isRegistered = true;
+    }
+
+    private static void RegisterSingle(IntPtr hwnd, int id, string hotkeyStr)
+    {
+        if (TryParseHotkey(hotkeyStr, out var mods, out var vk))
+        {
+            RegisterHotKey(hwnd, id, mods, vk);
+        }
+    }
+
+    public static bool TryParseHotkey(string hotkeyStr, out uint modifiers, out uint vk)
+    {
+        modifiers = MOD_NOREPEAT;
+        vk = 0;
+
+        if (string.IsNullOrWhiteSpace(hotkeyStr))
+            return false;
+
+        var parts = hotkeyStr.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return false;
+
+        string keyPart = parts[^1];
+
+        for (int i = 0; i < parts.Length - 1; i++)
+        {
+            var mod = parts[i].ToLowerInvariant();
+            if (mod is "ctrl" or "control") modifiers |= MOD_CONTROL;
+            else if (mod is "alt") modifiers |= MOD_ALT;
+            else if (mod is "shift") modifiers |= MOD_SHIFT;
+            else if (mod is "win" or "windows") modifiers |= MOD_WIN;
+        }
+
+        vk = ParseKeyToVk(keyPart);
+        return vk != 0;
+    }
+
+    private static uint ParseKeyToVk(string keyName)
+    {
+        keyName = keyName.Trim();
+        if (Enum.TryParse<Key>(keyName, true, out var key))
+        {
+            int rawVk = KeyInterop.VirtualKeyFromKey(key);
+            if (rawVk > 0) return (uint)rawVk;
+        }
+
+        return keyName.ToLowerInvariant() switch
+        {
+            "up" or "uparrow" => 0x26,
+            "down" or "downarrow" => 0x28,
+            "left" or "leftarrow" => 0x25,
+            "right" or "rightarrow" => 0x27,
+            "m" => 0x4D,
+            "s" => 0x53,
+            "v" => 0x56,
+            "n" => 0x4E,
+            "b" => 0x42,
+            "p" => 0x50,
+            _ => (uint)(keyName.Length == 1 ? char.ToUpperInvariant(keyName[0]) : 0)
+        };
     }
 
     public void Unregister()
