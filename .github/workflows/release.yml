@@ -32,18 +32,27 @@ jobs:
       - name: Run unit tests
         run: dotnet test BraviaTheatrePC.sln --no-restore --verbosity normal
 
-      - name: Publish single-file standalone executable
+      - name: Publish standalone self-contained executable
         run: |
           dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o publish
 
-      - name: Generate SHA-256 Checksum
+      - name: Publish lightweight framework-dependent executable
+        run: |
+          dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release --no-self-contained -p:PublishSingleFile=true -p:DebugType=none -o publish-fd
+          Move-Item -Path "publish-fd/BraviaTheatrePC.exe" -Destination "publish/BraviaTheatrePC-FrameworkDependent.exe"
+
+      - name: Generate SHA-256 Checksums
         shell: pwsh
         run: |
-          $hash = (Get-FileHash publish/BraviaTheatrePC.exe -Algorithm SHA256).Hash
-          Set-Content -Path "publish/BraviaTheatrePC.exe.sha256" -Value "$hash  BraviaTheatrePC.exe"
-          Write-Host "BraviaTheatrePC.exe SHA256: $hash"
+          $hashStandalone = (Get-FileHash publish/BraviaTheatrePC.exe -Algorithm SHA256).Hash
+          Set-Content -Path "publish/BraviaTheatrePC.exe.sha256" -Value "$hashStandalone  BraviaTheatrePC.exe"
+          Write-Host "BraviaTheatrePC.exe SHA256: $hashStandalone"
 
-      - name: Create GitHub Release & Upload Asset
+          $hashFd = (Get-FileHash publish/BraviaTheatrePC-FrameworkDependent.exe -Algorithm SHA256).Hash
+          Set-Content -Path "publish/BraviaTheatrePC-FrameworkDependent.exe.sha256" -Value "$hashFd  BraviaTheatrePC-FrameworkDependent.exe"
+          Write-Host "BraviaTheatrePC-FrameworkDependent.exe SHA256: $hashFd"
+
+      - name: Create GitHub Release & Upload Assets
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
@@ -54,3 +63,5 @@ jobs:
           files: |
             publish/BraviaTheatrePC.exe
             publish/BraviaTheatrePC.exe.sha256
+            publish/BraviaTheatrePC-FrameworkDependent.exe
+            publish/BraviaTheatrePC-FrameworkDependent.exe.sha256

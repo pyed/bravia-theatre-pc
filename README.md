@@ -78,11 +78,16 @@ All communication occurs locally over Sony's encrypted gRPC protocol (port 55051
 
 #### Option 1: Standalone Single-File Executable (Recommended)
 
-1. Download `BraviaTheatrePC.exe` from the latest [GitHub Releases](../../releases) page.
-2. Place the executable in a directory of your choice and run it (no runtime installation required).
-3. On first launch, the **Sony Account Setup** wizard will open automatically.
+1. Download **`BraviaTheatrePC.exe`** (~61 MB) from the latest [GitHub Releases](../../releases) page.
+2. Place the executable in any directory of your choice and run it (zero dependencies, no .NET installation required).
+3. On first launch, the **Sony Account Setup** wizard will open automatically to guide you through setup.
 
-#### Option 2: Running from Source
+#### Option 2: Ultra-Compact Lightweight Executable (3.5 MB)
+
+1. Download **`BraviaTheatrePC-FrameworkDependent.exe`** (3.5 MB) from [GitHub Releases](../../releases).
+2. Requires [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0) installed on your system.
+
+#### Option 3: Running from Source
 
 1. Clone the repository:
    ```bat
@@ -95,15 +100,13 @@ All communication occurs locally over Sony's encrypted gRPC protocol (port 55051
    dotnet run --project src/BraviaTheatre.UI/BraviaTheatre.UI.csproj
    ```
 
-#### Option 3: Publishing Standalone Executable Locally
+#### Option 4: Building Standalone Executable Locally
 
-To produce a self-contained single-file executable requiring no external .NET runtime on the host machine:
+To produce the self-contained single-file executable locally:
 
 ```bat
 dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o publish
 ```
-
-The compiled binary `publish/BraviaTheatrePC.exe` can be placed anywhere on your system.
 
 ---
 
