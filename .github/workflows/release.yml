@@ -1,10 +1,12 @@
-name: Build & Release (Native C# .NET)
+name: Build & Release (BRAVIA Theatre PC)
 
 on:
   push:
+    branches: [ "main", "feature/*" ]
     tags:
-      - 'v*-csharp'
       - 'v*'
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch:
 
 permissions:
@@ -12,7 +14,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Native Windows Executable
+    name: Build & Test Native Windows App
     runs-on: windows-latest
 
     steps:
@@ -45,7 +47,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: BRAVIA Theatre PC (Native) ${{ github.ref_name }}
+          name: BRAVIA Theatre PC ${{ github.ref_name }}
           draft: false
           prerelease: false
           generate_release_notes: true

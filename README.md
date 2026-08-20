@@ -1,8 +1,8 @@
-# BRAVIA Theatre PC
+# BRAVIA Theatre PC (v2.0.0)
 
 A high-performance, native Windows 11 system tray controller and Fluent Quick Settings flyout for modern Sony Home Audio systems, including the BRAVIA Theatre Bar 9 (HT-A9000), BRAVIA Theatre Bar 8 (HT-A8000), BRAVIA Theatre Quad (HT-A9M2), and compatible AV receivers.
 
-Built natively in C# and .NET 9 with Windows Presentation Foundation (WPF), BRAVIA Theatre PC delivers real-time audio bitstream identification directly in the Windows taskbar, instantaneous zero-latency volume adjustments, bass level calibration, and quick toggles for 360 Spatial Sound Mapping, Night Mode, Mute, and Power.
+Rewritten entirely from the ground up in C# and .NET 9 with Windows Presentation Foundation (WPF), BRAVIA Theatre PC v2.0.0 delivers real-time audio bitstream identification directly in the Windows taskbar, instantaneous zero-latency volume adjustments, bass level calibration, input switching, and quick toggles for 360 Spatial Sound Mapping (Sound Field), Night Mode, Voice Mode, and Power.
 
 All communication occurs locally over Sony's encrypted gRPC protocol (port 55051), providing instantaneous response times without routing telemetry or control commands through external cloud servers during active playback.
 
@@ -11,10 +11,14 @@ All communication occurs locally over Sony's encrypted gRPC protocol (port 55051
 ## Screenshots
 
 <div align="center">
-  <img src="assets/screenshots/flyout_dolby.png" width="31%" alt="Dolby Audio Live Flyout" />
-  <img src="assets/screenshots/flyout_dtsx.png" width="31%" alt="DTS:X Live Flyout" />
-  <img src="assets/screenshots/oauth_login.png" width="31%" alt="Sony Account PKCE Authentication Wizard" />
+  <img src="assets/screenshots/flyout_1.png" width="31%" alt="BRAVIA Theatre PC Live Flyout" />
+  <img src="assets/screenshots/flyout_2.png" width="31%" alt="BRAVIA Theatre PC Live Flyout with Rear Level Slider" />
+  <img src="assets/screenshots/flyout_3.png" width="31%" alt="BRAVIA Theatre PC Live Flyout Compact Mode" />
 </div>
+
+<p align="center">
+  <em>Live Windows 11 Fluent Quick Settings Flyout featuring dynamic audio bitstream detection, glowing power toggle, input source selection, compact action tiles, and native Windows sound slider.</em>
+</p>
 
 ---
 
@@ -29,27 +33,27 @@ All communication occurs locally over Sony's encrypted gRPC protocol (port 55051
   - **Sony 360 Reality Audio & AAC**
   - **Standby & Idle Indicators**
 - **Windows 11 Fluent Quick Settings Flyout:**
+  - **Header Controls:** Interactive input source switcher (`HDMI ▾`, `TV ▾`, `BLUETOOTH ▾`), glowing power symbol (`⏻`), and Settings gear (`⚙`).
+  - **Sony App-Aligned Quick Action Tiles:** Instant toggle buttons for **Night Mode**, **Sound Field** (360 Spatial Sound Mapping), and **Voice Mode**.
   - **Native Windows 11 Sound Slider & Mute Icon:** Custom halo thumb, Fluent Blue fill (`#4CC2FF`), click-to-point track jumping, mouse-wheel scrolling, and Windows speaker/mute icon (`Speaker + X`).
-  - **Interactive Input Source Selector:** Switch active soundbar input on the fly (`HDMI`, `TV`, `Bluetooth`, `Spotify`, `AirPlay`).
-  - **Compact Connection Indicator Dot:** Glowing status indicator with hover tooltips (`Online`, `Standby`, `Connecting`).
-  - **3-Way Bass Level Selector:** Compact segmented pill control (`MIN` | `MID` | `MAX`) for instant subwoofer calibration.
-  - **Optional Rear Speaker Control:** Toggled via Settings for systems paired with SA-RS3S / SA-RS5 surround speakers.
+  - **3-Way Bass Level Selector:** Compact segmented pill control (`MIN` | `MID` | `MAX`) for instant subwoofer level calibration.
+  - **Optional Rear Speaker Level Slider:** Smooth `-10` to `+10` level slider for systems paired with SA-RS3S or SA-RS5 surround speakers.
   - **Active Audio Hero Card:** Detailed bitstream format, audio channel layout (e.g., 7.1, 5.1.2, 2.0), and physical input source (eARC / HDMI).
-  - **Quick Action Tiles:** Toggle 360 Spatial Sound Mapping (Sound Field), Night Mode, Voice Mode, and Power with instant visual feedback.
+  - **Ergonomic Bottom-Anchored Layout:** Volume slider positioned closest to the taskbar for immediate reach.
 - **Configurable Global Keyboard Shortcuts:**
   - `Ctrl + Alt + Up`: Volume Up (+2)
   - `Ctrl + Alt + Down`: Volume Down (-2)
-  - `Ctrl + Alt + M`: Toggle Mute
+  - `Ctrl + Shift + M`: Toggle Mute
   - `Ctrl + Alt + S`: Toggle Sound Field
   - `Ctrl + Alt + V`: Toggle Voice Mode
   - `Ctrl + Alt + N`: Toggle Night Mode
   - *(All shortcuts are interactively customizable in the Settings window)*
-- **Dedicated Settings Window:** Windows 11 Fluent dialog for startup configuration, taskbar icon persistence, optional rear speaker level slider, and interactive global shortcut customization.
+- **Dedicated Fluent Settings Window:** Windows 11 Fluent dialog for startup configuration, taskbar icon persistence, optional rear speaker level slider, and interactive global shortcut customization with live key recording.
 - **High-Performance Non-Blocking Architecture:**
   - Background asynchronous command queuing with volume coalescing to prevent network bottlenecking during rapid slider movement.
   - Pure Win32 `Shell_NotifyIconW` integration with automatic explorer recovery upon `TaskbarCreated` messages.
 - **Local Network Auto-Discovery:**
-  - Multi-interface mDNS discovery (`_sonysmarthome._tcp.local.`) coupled with parallel subnet TCP probing on port `55051`, finding devices in ~130ms.
+  - Multi-interface mDNS discovery (`_sonysmarthome._tcp.local.`) coupled with parallel subnet TCP probing on port `55051`, finding devices in ~120ms.
 - **Built-in First-Time Setup Wizard:** Native graphical OAuth PKCE setup dialog that guides users step-by-step through Sony account authentication without manual command-line execution.
 
 ---
@@ -72,7 +76,13 @@ All communication occurs locally over Sony's encrypted gRPC protocol (port 55051
 
 ### Installation & Execution
 
-#### Option 1: Running from Source
+#### Option 1: Standalone Single-File Executable (Recommended)
+
+1. Download `BraviaTheatrePC.exe` from the latest [GitHub Releases](../../releases) page.
+2. Place the executable in a directory of your choice and run it (no runtime installation required).
+3. On first launch, the **Sony Account Setup** wizard will open automatically.
+
+#### Option 2: Running from Source
 
 1. Clone the repository:
    ```bat
@@ -85,7 +95,7 @@ All communication occurs locally over Sony's encrypted gRPC protocol (port 55051
    dotnet run --project src/BraviaTheatre.UI/BraviaTheatre.UI.csproj
    ```
 
-#### Option 2: Publishing Standalone Single-File Executable
+#### Option 3: Publishing Standalone Executable Locally
 
 To produce a self-contained single-file executable requiring no external .NET runtime on the host machine:
 
@@ -124,10 +134,10 @@ Sony BRAVIA Theatre devices derive local gRPC encryption keys from Sony Cloud OA
 
 - **Left-Click Tray Icon:** Opens the Windows 11 Fluent Quick Settings flyout panel.
 - **Mouse Wheel on Volume Card:** Adjusts soundbar master volume in 1-tick increments.
+- **Click Speaker Icon:** Toggles mute with Windows mute icon indicator.
 - **Right-Click Tray Icon:** Opens the context menu:
   - **Header Status:** Live soundbar power, bitstream format, and volume level.
-  - **Start with Windows:** Toggle automatic launch on Windows logon via the registry.
-  - **Always show on taskbar:** Pin icon next to the system clock.
+  - **Settings:** Opens the Settings dialog.
   - **Sony Account Setup:** Re-authenticate or switch Sony accounts.
   - **Exit:** Shut down the application.
 
@@ -162,8 +172,9 @@ bravia-theatre-pc/
 │   │   ├── Protos/                      # Sony gRPC ControlDevice service protobuf definitions
 │   │   └── Wire/                        # Bit-for-bit protobuf wire codecs & HMAC signing
 │   └── BraviaTheatre.UI/                # Native Windows 11 WPF application
-│       ├── Services/                    # Native Win32 tray wrapper (Shell_NotifyIconW)
-│       └── Views/                       # Windows 11 Fluent Flyout & OAuth Setup Wizard
+│       ├── Models/                      # AppSettings model
+│       ├── Services/                    # Native Win32 tray wrapper (Shell_NotifyIconW) & Global Hotkeys
+│       └── Views/                       # Windows 11 Fluent Flyout, Settings Dialog, & Setup Wizard
 └── tests/
     └── BraviaTheatre.Tests/             # Automated xUnit wire codec test suite
 ```
