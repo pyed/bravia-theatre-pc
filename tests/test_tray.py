@@ -1,8 +1,14 @@
 """Unit tests for Sony BRAVIA Theatre Tray Controller."""
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 from PIL import Image
 
 from src.icon_manager import (
@@ -13,8 +19,6 @@ from src.icon_manager import (
     normalize_codec,
 )
 
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
 ASSETS_DIR = ROOT_DIR / "assets" / "icons"
 
 
