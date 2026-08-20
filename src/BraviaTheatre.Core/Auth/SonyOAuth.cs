@@ -77,23 +77,44 @@ public static class SonyOAuth
     public static string ParseAuthorizationCode(string redirectOrCode)
     {
         var value = redirectOrCode.Trim();
-        if (value.StartsWith("ssh-app://") || (value.Contains("code=") && value.Contains("://")))
+
+        // 1. Full URI like ssh-app://signin?code=XYZ&state=... or https://...
+        if (value.StartsWith("ssh-app://", StringComparison.OrdinalIgnoreCase) || value.Contains("://"))
         {
-            var uri = new Uri(value.Replace("ssh-app://", "https://"));
-            var parsed = HttpUtility.ParseQueryString(uri.Query);
-            var code = parsed.Get("code");
-            if (!string.IsNullOrEmpty(code))
-                return code;
+            try
+            {
+                var fixedUri = value.StartsWith("ssh-app://", StringComparison.OrdinalIgnoreCase)
+                    ? "https://" + value["ssh-app://".Length..]
+                    : value;
+
+                var uri = new Uri(fixedUri);
+                var query = HttpUtility.ParseQueryString(uri.Query);
+                var code = query.Get("code");
+                if (!string.IsNullOrEmpty(code))
+                    return code.Trim();
+            }
+            catch
+            {
+                // Fallback to substring extraction
+            }
         }
 
+        // 2. Query string chunk with code=
         if (value.Contains("code="))
         {
-            var parts = value.Split('&');
-            foreach (var p in parts)
-            {
-                if (p.StartsWith("code="))
-                    return p["code=".Length..];
-            }
+            var idx = value.IndexOf("code=", StringComparison.OrdinalIgnoreCase);
+            var sub = value[(idx + 5)..];
+            var ampIdx = sub.IndexOf('&');
+            if (ampIdx >= 0)
+                sub = sub[..ampIdx];
+            return sub.Trim();
+        }
+
+        // 3. User pasted "code&state=..."
+        if (value.Contains("&state="))
+        {
+            var ampIdx = value.IndexOf("&state=", StringComparison.OrdinalIgnoreCase);
+            return value[..ampIdx].Trim();
         }
 
         return value;
@@ -105,6 +126,8 @@ public static class SonyOAuth
         string? expectedState = null)
     {
         var authCode = ParseAuthorizationCode(redirectOrCode);
+        if (string.IsNullOrWhiteSpace(authCode))
+            throw new InvalidOperationException("Could not extract a valid authorization code.");
 
         using var client = new HttpClient();
 
@@ -121,12 +144,23 @@ public static class SonyOAuth
         });
 
         var tokenResp = await client.SendAsync(tokenReq);
-        tokenResp.EnsureSuccessStatusCode();
-
         var tokenJson = await tokenResp.Content.ReadAsStringAsync();
+
+        if (!tokenResp.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"Sony Token Exchange Failed (HTTP {(int)tokenResp.StatusCode}):\n{tokenJson}\n\n" +
+                "Please ensure you copied the fresh 'code' right after signing in."
+            );
+        }
+
         using var tokenDoc = JsonDocument.Parse(tokenJson);
-        var accessToken = tokenDoc.RootElement.GetProperty("access_token").GetString()
-            ?? throw new InvalidOperationException("Missing access_token");
+        if (!tokenDoc.RootElement.TryGetProperty("access_token", out var atProp) || string.IsNullOrEmpty(atProp.GetString()))
+        {
+            throw new InvalidOperationException($"Invalid token response from Sony: {tokenJson}");
+        }
+
+        var accessToken = atProp.GetString()!;
         var refreshToken = tokenDoc.RootElement.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null;
 
         // 2. Fetch IoT devices
@@ -136,11 +170,18 @@ public static class SonyOAuth
         devReq.Headers.Add("Authorization", $"Bearer {accessToken}");
 
         var devResp = await client.SendAsync(devReq);
-        devResp.EnsureSuccessStatusCode();
-
         var devJson = await devResp.Content.ReadAsStringAsync();
+
+        if (!devResp.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Sony Device Query Failed (HTTP {(int)devResp.StatusCode}):\n{devJson}");
+        }
+
         using var devDoc = JsonDocument.Parse(devJson);
-        var devices = devDoc.RootElement.GetProperty("devices");
+        if (!devDoc.RootElement.TryGetProperty("devices", out var devices))
+        {
+            throw new InvalidOperationException($"Unexpected device list response: {devJson}");
+        }
 
         string? deviceId = null;
         foreach (var dev in devices.EnumerateArray())
@@ -148,13 +189,16 @@ public static class SonyOAuth
             var type = dev.TryGetProperty("device_type", out var dt) ? dt.GetString() : null;
             if (type == "Speaker" || type == "TV" || deviceId == null)
             {
-                deviceId = dev.GetProperty("device_id").GetString();
-                if (type == "Speaker") break; // Prefer soundbar/speaker
+                if (dev.TryGetProperty("device_id", out var dIdProp))
+                {
+                    deviceId = dIdProp.GetString();
+                    if (type == "Speaker") break; // Prefer soundbar
+                }
             }
         }
 
         if (string.IsNullOrEmpty(deviceId))
-            throw new InvalidOperationException("No compatible Sony audio devices found on account");
+            throw new InvalidOperationException("No Sony soundbar/speaker or TV found associated with this account.");
 
         // 3. Fetch gRPC session keys
         var keysReq = new HttpRequestMessage(HttpMethod.Post, $"{IotBaseUrl}/devices/{deviceId}/session_keys");
@@ -163,16 +207,29 @@ public static class SonyOAuth
         keysReq.Headers.Add("Authorization", $"Bearer {accessToken}");
 
         var keysResp = await client.SendAsync(keysReq);
-        keysResp.EnsureSuccessStatusCode();
-
         var keysJson = await keysResp.Content.ReadAsStringAsync();
+
+        if (!keysResp.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Sony Session Key Fetch Failed (HTTP {(int)keysResp.StatusCode}):\n{keysJson}");
+        }
+
         using var keysDoc = JsonDocument.Parse(keysJson);
+
+        var sessionId = keysDoc.RootElement.TryGetProperty("session_id", out var sIdProp) ? sIdProp.GetString() : null;
+        var hmacKey = keysDoc.RootElement.TryGetProperty("hmac_key", out var hProp) ? hProp.GetString() : null;
+        var cId = keysDoc.RootElement.TryGetProperty("client_id", out var cProp) ? cProp.GetString() : ClientId;
+
+        if (string.IsNullOrEmpty(sessionId) || string.IsNullOrEmpty(hmacKey))
+        {
+            throw new InvalidOperationException($"Invalid session keys response: {keysJson}");
+        }
 
         return new SonyCredentials
         {
-            ClientId = keysDoc.RootElement.GetProperty("client_id").GetString() ?? ClientId,
-            SessionId = keysDoc.RootElement.GetProperty("session_id").GetString() ?? string.Empty,
-            HmacKey = keysDoc.RootElement.GetProperty("hmac_key").GetString() ?? string.Empty,
+            ClientId = cId ?? ClientId,
+            SessionId = sessionId,
+            HmacKey = hmacKey,
             AccessToken = accessToken,
             RefreshToken = refreshToken,
             DeviceId = deviceId
