@@ -23,6 +23,14 @@ venv/
 ENV/
 env/
 
+# .NET build artifacts
+[Bb]in/
+[Oo]bj/
+publish/
+publish-fd/
+*.user
+*.suo
+
 # IDE & OS files
 .idea/
 .vscode/

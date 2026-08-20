@@ -1,0 +1,54 @@
+name: Build & Release (Native C# .NET)
+
+on:
+  push:
+    tags:
+      - 'v*-csharp'
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Native Windows Executable
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 9 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore BraviaTheatrePC.sln
+
+      - name: Run unit tests
+        run: dotnet test BraviaTheatrePC.sln --no-restore --verbosity normal
+
+      - name: Publish single-file standalone executable
+        run: |
+          dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o publish
+
+      - name: Generate SHA-256 Checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash publish/BraviaTheatrePC.exe -Algorithm SHA256).Hash
+          Set-Content -Path "publish/BraviaTheatrePC.exe.sha256" -Value "$hash  BraviaTheatrePC.exe"
+          Write-Host "BraviaTheatrePC.exe SHA256: $hash"
+
+      - name: Create GitHub Release & Upload Asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: BRAVIA Theatre PC (Native) ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            publish/BraviaTheatrePC.exe
+            publish/BraviaTheatrePC.exe.sha256
