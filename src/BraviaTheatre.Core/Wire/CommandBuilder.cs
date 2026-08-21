@@ -10,7 +10,7 @@ public static class CommandBuilder
     {
         var sessionIdBytes = Encoding.UTF8.GetBytes(sessionId);
         using var ms = new MemoryStream();
-        
+
         // Field 1 (0x0A): session_random
         var fRand = ProtobufWireCodec.LengthDelimited(1, sessionRandom);
         ms.Write(fRand, 0, fRand.Length);
@@ -39,7 +39,7 @@ public static class CommandBuilder
             var inner = new byte[] { 0x08, (byte)(boolValue.Value ? 0x01 : 0x00) };
             return ProtobufWireCodec.LengthDelimited(5, inner); // Field 5 (0x2A)
         }
-        if (!string.IsNullOrEmpty(stringValue))
+        if (stringValue != null)
         {
             var strBytes = Encoding.UTF8.GetBytes(stringValue);
             var inner = ProtobufWireCodec.LengthDelimited(1, strBytes);
@@ -57,6 +57,12 @@ public static class CommandBuilder
         bool? boolValue = null,
         string? stringValue = null)
     {
+        var suppliedValueCount = (intValue.HasValue ? 1 : 0)
+            + (boolValue.HasValue ? 1 : 0)
+            + (stringValue != null ? 1 : 0);
+        if (suppliedValueCount != 1)
+            throw new ArgumentException("Must specify exactly one value (int, bool, or string)");
+
         var pathBytes = Encoding.UTF8.GetBytes(commandPath);
         var suffix = BuildValueSuffix(intValue, boolValue, stringValue);
 
@@ -109,6 +115,8 @@ public static class CommandBuilder
 
     public static bool ParseExecResponse(ReadOnlySpan<byte> raw)
     {
-        return (raw.Length == 2 && raw[0] == 0x08 && raw[1] == 0x01) || raw.Length == 0;
+        // Sony firmware reports a successful command either with field 1=true
+        // or with an empty protobuf response on an otherwise successful RPC.
+        return raw.IsEmpty || (raw.Length == 2 && raw[0] == 0x08 && raw[1] == 0x01);
     }
 }

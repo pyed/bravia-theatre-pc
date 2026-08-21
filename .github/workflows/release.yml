@@ -1,60 +1,79 @@
-name: Build & Release (BRAVIA Theatre PC)
+name: Release
 
 on:
   push:
-    branches: [ "main", "feature/*" ]
     tags:
-      - 'v*'
-  pull_request:
-    branches: [ "main" ]
-  workflow_dispatch:
+      - "v*"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build & Test Native Windows App
+  release:
+    name: Build, attest, and publish release
     runs-on: windows-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up .NET 9 SDK
-        uses: actions/setup-dotnet@v4
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          dotnet-version: '9.0.x'
+          persist-credentials: false
 
-      - name: Restore dependencies
-        run: dotnet restore BraviaTheatrePC.sln
+      - name: Set up .NET 10 SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.302
 
-      - name: Run unit tests
-        run: dotnet test BraviaTheatrePC.sln --no-restore --verbosity normal
-
-      - name: Publish standalone self-contained executable
-        run: |
-          dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o publish
-
-      - name: Publish lightweight framework-dependent executable
-        run: |
-          dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release --no-self-contained -p:PublishSingleFile=true -p:DebugType=none -o publish-fd
-          Move-Item -Path "publish-fd/BraviaTheatrePC.exe" -Destination "publish/BraviaTheatrePC-FrameworkDependent.exe"
-
-      - name: Generate SHA-256 Checksums
+      - name: Derive package version from release tag
         shell: pwsh
         run: |
-          $hashStandalone = (Get-FileHash publish/BraviaTheatrePC.exe -Algorithm SHA256).Hash
-          Set-Content -Path "publish/BraviaTheatrePC.exe.sha256" -Value "$hashStandalone  BraviaTheatrePC.exe"
-          Write-Host "BraviaTheatrePC.exe SHA256: $hashStandalone"
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -notmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?)$') {
+            throw "Release tag '$tag' must use the form vMAJOR.MINOR.PATCH or a valid prerelease suffix."
+          }
 
-          $hashFd = (Get-FileHash publish/BraviaTheatrePC-FrameworkDependent.exe -Algorithm SHA256).Hash
-          Set-Content -Path "publish/BraviaTheatrePC-FrameworkDependent.exe.sha256" -Value "$hashFd  BraviaTheatrePC-FrameworkDependent.exe"
-          Write-Host "BraviaTheatrePC-FrameworkDependent.exe SHA256: $hashFd"
+          "RELEASE_VERSION=$($Matches.version)" >> $env:GITHUB_ENV
 
-      - name: Create GitHub Release & Upload Assets
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Restore dependencies
+        run: dotnet restore BraviaTheatrePC.sln -r win-x64 -p:Version=$env:RELEASE_VERSION
+
+      - name: Build and test
+        run: dotnet test BraviaTheatrePC.sln -c Release --no-restore -warnaserror -p:Version=$env:RELEASE_VERSION
+
+      - name: Publish standalone executable
+        run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained --no-restore -p:Version=$env:RELEASE_VERSION -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o publish/standalone
+
+      - name: Publish framework-dependent executable
+        run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --no-self-contained --no-restore -p:Version=$env:RELEASE_VERSION -p:PublishSingleFile=true -p:DebugType=none -o publish/framework-dependent
+
+      - name: Prepare release assets and checksums
+        shell: pwsh
+        run: |
+          Move-Item -LiteralPath "publish/framework-dependent/BraviaTheatrePC.exe" -Destination "publish/BraviaTheatrePC-FrameworkDependent.exe"
+          Move-Item -LiteralPath "publish/standalone/BraviaTheatrePC.exe" -Destination "publish/BraviaTheatrePC.exe"
+          $standaloneHash = (Get-FileHash -LiteralPath "publish/BraviaTheatrePC.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $frameworkHash = (Get-FileHash -LiteralPath "publish/BraviaTheatrePC-FrameworkDependent.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath "publish/BraviaTheatrePC.exe.sha256" -Value "$standaloneHash  BraviaTheatrePC.exe" -Encoding utf8NoBOM
+          Set-Content -LiteralPath "publish/BraviaTheatrePC-FrameworkDependent.exe.sha256" -Value "$frameworkHash  BraviaTheatrePC-FrameworkDependent.exe" -Encoding utf8NoBOM
+
+      - name: Attest release executables
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            publish/BraviaTheatrePC.exe
+            publish/BraviaTheatrePC-FrameworkDependent.exe
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           name: BRAVIA Theatre PC ${{ github.ref_name }}
           draft: false

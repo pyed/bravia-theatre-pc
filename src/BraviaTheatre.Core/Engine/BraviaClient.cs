@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
@@ -109,8 +110,7 @@ public sealed class BraviaClient : IBraviaClient
             var req = new GetSessionRandomRequest { SessionId = sessId };
             var resp = await _protoClient.GetSessionRandomAsync(req, cancellationToken: cts.Token);
 
-            _sessionRandom = resp.SessionRandom.ToByteArray();
-            _sessionId = !string.IsNullOrEmpty(resp.SessionId) ? resp.SessionId : sessId;
+            ApplySessionRandomResponse(resp, sessId);
         }
         finally
         {
@@ -133,10 +133,9 @@ public sealed class BraviaClient : IBraviaClient
             {
                 throw;
             }
-            catch (Exception ex)
+            catch (RpcException ex) when (IsUnsupportedPathStatus(ex.StatusCode))
             {
-                // Unavailable or unsupported path (e.g. no rear speakers)
-                LogAction?.Invoke($"[Query] Path '{path}' unavailable: {ex.Message}");
+                LogAction?.Invoke($"[Query] Path '{path}' unsupported ({ex.StatusCode}).");
             }
         }
         return result;
@@ -152,16 +151,16 @@ public sealed class BraviaClient : IBraviaClient
         {
             if (_sessionRandom == null || string.IsNullOrEmpty(_sessionId))
             {
-                var reqRandom = new GetSessionRandomRequest { SessionId = _creds.SessionId };
+                var requestSessionId = CurrentSessionId;
+                var reqRandom = new GetSessionRandomRequest { SessionId = requestSessionId };
                 var respRandom = await _protoClient.GetSessionRandomAsync(reqRandom, cancellationToken: cts.Token);
-                _sessionRandom = respRandom.SessionRandom.ToByteArray();
-                _sessionId = !string.IsNullOrEmpty(respRandom.SessionId) ? respRandom.SessionId : _creds.SessionId;
+                ApplySessionRandomResponse(respRandom, requestSessionId);
             }
 
             var reqBytes = StatesCodec.BuildSingleGetStatesRequest(
                 _creds.HmacKey,
                 path,
-                _sessionRandom,
+                _sessionRandom ?? throw new InvalidDataException("Session random was not initialized."),
                 _sessionId);
 
             var call = _channel.CreateCallInvoker().AsyncUnaryCall(GetStatesMethod, null, new CallOptions(cancellationToken: cts.Token), reqBytes);
@@ -193,15 +192,15 @@ public sealed class BraviaClient : IBraviaClient
         try
         {
             // Fresh session random is required before each ExecCommand
-            var reqRandom = new GetSessionRandomRequest { SessionId = _creds.SessionId };
+            var requestSessionId = CurrentSessionId;
+            var reqRandom = new GetSessionRandomRequest { SessionId = requestSessionId };
             var respRandom = await _protoClient.GetSessionRandomAsync(reqRandom, cancellationToken: cts.Token);
-            _sessionRandom = respRandom.SessionRandom.ToByteArray();
-            _sessionId = !string.IsNullOrEmpty(respRandom.SessionId) ? respRandom.SessionId : _creds.SessionId;
+            ApplySessionRandomResponse(respRandom, requestSessionId);
 
             var reqBytes = CommandBuilder.BuildExecCommandRequest(
                 _creds.HmacKey,
                 path,
-                _sessionRandom,
+                _sessionRandom ?? throw new InvalidDataException("Session random was not initialized."),
                 _sessionId,
                 intValue,
                 boolValue,
@@ -220,7 +219,7 @@ public sealed class BraviaClient : IBraviaClient
 
     public AsyncServerStreamingCall<byte[]> StartNotifyStream(CancellationToken ct = default)
     {
-        var startReq = new StartNotifyStatesRequest { SessionId = _creds.SessionId };
+        var startReq = new StartNotifyStatesRequest { SessionId = CurrentSessionId };
         var bodyBytes = startReq.ToByteArray();
 
         return _channel.CreateCallInvoker().AsyncServerStreamingCall(NotifyMethod, null, new CallOptions(cancellationToken: ct), bodyBytes);
@@ -240,5 +239,28 @@ public sealed class BraviaClient : IBraviaClient
     {
         _sessionLock.Dispose();
         _channel.Dispose();
+    }
+
+    internal string CurrentSessionId => string.IsNullOrEmpty(_sessionId) ? _creds.SessionId : _sessionId;
+
+    internal static bool IsUnsupportedPathStatus(StatusCode statusCode)
+    {
+        return statusCode is StatusCode.InvalidArgument
+            or StatusCode.NotFound
+            or StatusCode.OutOfRange;
+    }
+
+    internal static string ResolveSessionId(string requestSessionId, string? responseSessionId)
+    {
+        return string.IsNullOrWhiteSpace(responseSessionId) ? requestSessionId : responseSessionId;
+    }
+
+    private void ApplySessionRandomResponse(GetSessionRandomResponse response, string requestSessionId)
+    {
+        if (response.SessionRandom.Length != 8)
+            throw new InvalidDataException("GetSessionRandom returned an invalid session random.");
+
+        _sessionRandom = response.SessionRandom.ToByteArray();
+        _sessionId = ResolveSessionId(requestSessionId, response.SessionId);
     }
 }

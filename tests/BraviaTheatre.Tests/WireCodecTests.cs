@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Linq;
 using System.Text;
 using BraviaTheatre.Core.Wire;
 using Xunit;
@@ -7,21 +9,62 @@ namespace BraviaTheatre.Tests;
 
 public class WireCodecTests
 {
+    private const string SyntheticSessionId = "11111111-2222-3333-4444-555555555555";
+    private static readonly string SyntheticHmacKey = Convert.ToHexString(
+        Enumerable.Range(0, 32).Select(static value => (byte)value).ToArray());
+
     [Fact]
     public void TestVarintEncoding()
     {
-        var encoded0 = ProtobufWireCodec.EncodeVarint(0);
-        Assert.Equal(new byte[] { 0x00 }, encoded0);
-
-        var encoded1 = ProtobufWireCodec.EncodeVarint(1);
-        Assert.Equal(new byte[] { 0x01 }, encoded1);
+        Assert.Equal(new byte[] { 0x00 }, ProtobufWireCodec.EncodeVarint(0));
+        Assert.Equal(new byte[] { 0x01 }, ProtobufWireCodec.EncodeVarint(1));
 
         var encoded300 = ProtobufWireCodec.EncodeVarint(300);
         Assert.Equal(new byte[] { 0xAC, 0x02 }, encoded300);
 
-        var (val, pos) = ProtobufWireCodec.ReadVarint(encoded300, 0);
-        Assert.Equal(300UL, val);
+        var (value, pos) = ProtobufWireCodec.ReadVarint(encoded300, 0);
+        Assert.Equal(300UL, value);
         Assert.Equal(2, pos);
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0x80 })]
+    [InlineData(new byte[] { 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80 })]
+    [InlineData(new byte[] { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x02 })]
+    public void TryReadVarintRejectsTruncatedOrOverflowingValues(byte[] raw)
+    {
+        Assert.False(ProtobufWireCodec.TryReadVarint(raw, 0, out _, out _));
+        Assert.Throws<InvalidDataException>(() => ProtobufWireCodec.ReadVarint(raw, 0));
+    }
+
+    [Fact]
+    public void TryDecodeFieldRejectsOversizedLengthWithoutThrowing()
+    {
+        var raw = new byte[] { 0x12, 0xFF, 0xFF, 0xFF, 0xFF, 0x0F };
+        var exception = Record.Exception(() =>
+            ProtobufWireCodec.TryDecodeField(raw, 0, out _, out _));
+
+        Assert.Null(exception);
+        Assert.False(ProtobufWireCodec.TryDecodeField(raw, 0, out _, out _));
+    }
+
+    [Fact]
+    public void DecodeFieldSkipsFixedWidthUnknownFieldsSafely()
+    {
+        var raw = new byte[]
+        {
+            0x0D, 0x01, 0x02, 0x03, 0x04, // field 1, fixed32
+            0x10, 0x07                    // field 2, varint 7
+        };
+
+        Assert.True(ProtobufWireCodec.TryDecodeField(raw, 0, out var first, out var next));
+        Assert.Equal(5, first!.WireType);
+        Assert.Equal(5, next);
+
+        Assert.True(ProtobufWireCodec.TryDecodeField(raw, next, out var second, out next));
+        Assert.Equal(2, second!.FieldNumber);
+        Assert.Equal(7UL, second.VarintValue);
+        Assert.Equal(raw.Length, next);
     }
 
     [Fact]
@@ -30,7 +73,6 @@ public class WireCodecTests
         var body = Encoding.UTF8.GetBytes("hello");
         var field = ProtobufWireCodec.LengthDelimited(1, body);
 
-        // tag = (1 << 3) | 2 = 0x0a, length = 5, body = "hello"
         Assert.Equal(0x0A, field[0]);
         Assert.Equal(5, field[1]);
         Assert.Equal("hello", Encoding.UTF8.GetString(field.AsSpan(2, 5)));
@@ -39,41 +81,48 @@ public class WireCodecTests
     [Fact]
     public void TestHmacSigning()
     {
-        var keyHex = "***REMOVED***";
-        var message = Encoding.UTF8.GetBytes("test_message");
+        var message = Encoding.UTF8.GetBytes("synthetic-test-message");
+        var hmac = PacketSigner.ComputeHmac(SyntheticHmacKey, message);
 
-        var hmac = PacketSigner.ComputeHmac(keyHex, message);
-        Assert.NotNull(hmac);
         Assert.Equal(32, hmac.Length);
+        Assert.Equal(
+            "46424bfb6dfad30f03e31a89dd0ec7fd69c8c486125f129434aa62540c8bef79",
+            Convert.ToHexString(hmac).ToLowerInvariant());
     }
 
     [Fact]
     public void TestExecCommandBuilding()
     {
-        var keyHex = new string('a', 64);
-        var sessionRandom = new byte[8];
-        var ***REMOVED***;
-
-        var req = CommandBuilder.BuildExecCommandRequest(
-            keyHex,
+        var request = CommandBuilder.BuildExecCommandRequest(
+            SyntheticHmacKey,
             "volume",
-            sessionRandom,
-            sessionId,
+            new byte[8],
+            SyntheticSessionId,
             intValue: 25);
 
-        Assert.NotNull(req);
-        Assert.True(req.Length > 0);
-        Assert.Equal(0x0A, req[0]); // Outer tag
+        Assert.NotEmpty(request);
+        Assert.Equal(0x0A, request[0]);
+    }
+
+    [Fact]
+    public void ExecCommandRequiresExactlyOneValue()
+    {
+        Assert.Throws<ArgumentException>(() => CommandBuilder.BuildExecCommandRequest(
+            SyntheticHmacKey,
+            "volume",
+            new byte[8],
+            SyntheticSessionId,
+            intValue: 25,
+            boolValue: true));
     }
 
     [Fact]
     public void TestExecResponseParsing()
     {
-        var okResp = new byte[] { 0x08, 0x01 };
-        Assert.True(CommandBuilder.ParseExecResponse(okResp));
-
-        var failResp = new byte[] { 0x08, 0x00 };
-        Assert.False(CommandBuilder.ParseExecResponse(failResp));
+        Assert.True(CommandBuilder.ParseExecResponse(new byte[] { 0x08, 0x01 }));
+        Assert.False(CommandBuilder.ParseExecResponse(new byte[] { 0x08, 0x00 }));
+        Assert.True(CommandBuilder.ParseExecResponse(Array.Empty<byte>()));
+        Assert.False(CommandBuilder.ParseExecResponse(new byte[] { 0x08, 0x01, 0x10, 0x01 }));
     }
 
     [Theory]
@@ -89,39 +138,61 @@ public class WireCodecTests
     }
 
     [Fact]
-    public void TestParseGetStatesResponse()
+    public void ParseGetStatesResponseSkipsOpaqueMetadata()
     {
-        var raw = Convert.FromHexString("12580a0e0a0c0a06766f6c756d65120208511220244df0e107ff5017655828d7a23d65f7514b4dfc01c36733ade21952a559f1341a2437343931643738642d643039622d343634382d613739312d313136613530636363393061");
+        var authToken = Enumerable.Repeat((byte)0xA5, 32).ToArray();
+        // This prefix previously made the parser reinterpret auth bytes as a
+        // length-delimited state entry and throw ArgumentOutOfRangeException.
+        new byte[] { 0x12, 0xFF, 0xFF, 0xFF, 0xFF, 0x0F }.CopyTo(authToken, 0);
+        var raw = BuildSyntheticStatesResponse(authToken);
+
+        var exception = Record.Exception(() => StatesCodec.ParseGetStatesResponse(raw));
+        Assert.Null(exception);
+
         var states = StatesCodec.ParseGetStatesResponse(raw);
-        Assert.True(states.ContainsKey("volume"));
+        Assert.Single(states);
         Assert.Equal(81, Convert.ToInt32(states["volume"]));
+
+        var (_, extractedAuth, sessionId) = StatesCodec.ExtractSessionTokens(raw);
+        Assert.Equal(authToken, extractedAuth);
+        Assert.Equal(SyntheticSessionId, sessionId);
+    }
+
+    [Fact]
+    public void MalformedStatesResponseReturnsOnlyCompleteEntries()
+    {
+        var complete = BuildSyntheticStatesResponse(new byte[32]);
+        var truncated = complete[..^1];
+
+        var exception = Record.Exception(() => StatesCodec.ParseGetStatesResponse(truncated));
+        Assert.Null(exception);
+        Assert.Empty(StatesCodec.ParseGetStatesResponse(truncated));
     }
 
     [Fact]
     public void TestBuildSingleGetStatesRequest()
     {
-        var path = "volume";
-        var rnd = Convert.FromHexString("0102030405060708");
-        var sid = "7491d78d-d09b-4648-a791-116a50ccc90a";
-        var key = "***REMOVED***";
+        var bytes = StatesCodec.BuildSingleGetStatesRequest(
+            SyntheticHmacKey,
+            "volume",
+            Convert.FromHexString("0102030405060708"),
+            SyntheticSessionId);
 
-        var bytes = StatesCodec.BuildSingleGetStatesRequest(key, path, rnd, sid);
-        var expectedHex = "0a3c0a080a06766f6c756d6512300a0801020304050607081a2437343931643738642d643039622d343634382d613739312d313136613530636363393061122029e4309d3ccc3fdcb8fd506037ddf3978405e0c79b874c5d96606a5e2d6846a4";
-
+        const string expectedHex = "0a3c0a080a06766f6c756d6512300a0801020304050607081a2431313131313131312d323232322d333333332d343434342d35353535353535353535353512206309ccd57e9b4823ad95eef30dd87abc77cd7d2220ca88a84c1d69da53765cd8";
         Assert.Equal(expectedHex, Convert.ToHexString(bytes).ToLowerInvariant());
     }
 
     [Fact]
     public void TestBuildExecCommandRequest()
     {
-        var path = "volume";
-        var rnd = Convert.FromHexString("0102030405060708");
-        var sid = "7491d78d-d09b-4648-a791-116a50ccc90a";
-        var key = "***REMOVED***";
+        var bytes = CommandBuilder.BuildExecCommandRequest(
+            SyntheticHmacKey,
+            "volume",
+            Convert.FromHexString("0102030405060708"),
+            SyntheticSessionId,
+            intValue: 37);
 
-        var bytes = CommandBuilder.BuildExecCommandRequest(key, path, rnd, sid, intValue: 37);
-        var expectedHex = "0a680a440a100a0e0a06766f6c756d6510012202082512300a0801020304050607081a2437343931643738642d643039622d343634382d613739312d3131366135306363633930611220330b311a6a188542406192348bc68dd29e2188b2eba9947623463ddd7661ff58";
-
+        const string expectedHex = "0a680a440a100a0e0a06766f6c756d6510012202082512300a0801020304050607081a2431313131313131312d323232322d333333332d343434342d3535353535353535353535351220cd32bcc6b7b809fea0fe2901a8f73ff9f4f188d0d473bfe5faa8600ea508664a";
         Assert.Equal(expectedHex, Convert.ToHexString(bytes).ToLowerInvariant());
     }
 
@@ -141,5 +212,30 @@ public class WireCodecTests
 
         Assert.Equal(expectedKind, kind);
         Assert.Equal(expectedLabel, label);
+    }
+
+    private static byte[] BuildSyntheticStatesResponse(byte[] authToken)
+    {
+        var path = ProtobufWireCodec.LengthDelimited(1, Encoding.UTF8.GetBytes("volume"));
+        var value = ProtobufWireCodec.LengthDelimited(2, new byte[] { 0x08, 0x51 });
+        var entry = Concat(path, value);
+        var entriesStream = ProtobufWireCodec.LengthDelimited(1, entry);
+        var statesField = ProtobufWireCodec.LengthDelimited(1, entriesStream);
+        var authField = ProtobufWireCodec.LengthDelimited(2, authToken);
+        var sessionField = ProtobufWireCodec.LengthDelimited(3, Encoding.UTF8.GetBytes(SyntheticSessionId));
+        return ProtobufWireCodec.LengthDelimited(2, Concat(statesField, authField, sessionField));
+    }
+
+    private static byte[] Concat(params byte[][] values)
+    {
+        var length = values.Sum(value => value.Length);
+        var result = new byte[length];
+        var offset = 0;
+        foreach (var value in values)
+        {
+            Buffer.BlockCopy(value, 0, result, offset, value.Length);
+            offset += value.Length;
+        }
+        return result;
     }
 }

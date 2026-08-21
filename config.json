@@ -1,8 +1,0 @@
-{
-  "host": "",
-  "port": 55051,
-  "discovery_timeout": 6,
-  "reconnect_min_seconds": 5,
-  "reconnect_max_seconds": 60,
-  "menu_refresh_ms": 500
-}

@@ -13,81 +13,87 @@ public static class IconHelper
     private static readonly ConcurrentDictionary<string, ImageSource> ImageCache = new();
     private static readonly ConcurrentDictionary<string, System.Drawing.Icon> IconCache = new();
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(IntPtr hIcon);
+
     public static ImageSource? GetImageSource(string badgeKind)
     {
-        if (ImageCache.TryGetValue(badgeKind, out var cached))
-            return cached;
+        var key = NormalizeBadgeKind(badgeKind);
+        if (ImageCache.TryGetValue(key, out var cached)) return cached;
 
-        try
-        {
-            var uri = new Uri($"pack://application:,,,/Assets/Icons/{badgeKind}.png", UriKind.Absolute);
-            var bmp = new BitmapImage(uri);
-            bmp.Freeze();
-            ImageCache[badgeKind] = bmp;
-            return bmp;
-        }
-        catch
-        {
-            try
-            {
-                var uri = new Uri("pack://application:,,,/Assets/Icons/idle.png", UriKind.Absolute);
-                var bmp = new BitmapImage(uri);
-                bmp.Freeze();
-                return bmp;
-            }
-            catch
-            {
-                return null;
-            }
-        }
+        var image = TryLoadImage(key) ?? (key == "idle" ? null : TryLoadImage("idle"));
+        if (image != null) ImageCache.TryAdd(key, image);
+        return image;
     }
 
     public static System.Drawing.Icon GetTrayIcon(string badgeKind)
     {
-        if (IconCache.TryGetValue(badgeKind, out var cached))
-            return cached;
+        var key = NormalizeBadgeKind(badgeKind);
+        if (IconCache.TryGetValue(key, out var cached)) return cached;
 
-        try
-        {
-            var uri = new Uri($"pack://application:,,,/Assets/Icons/{badgeKind}.png", UriKind.Absolute);
-            var streamInfo = Application.GetResourceStream(uri);
-            if (streamInfo != null)
-            {
-                using var mem = new MemoryStream();
-                streamInfo.Stream.CopyTo(mem);
-                mem.Position = 0;
-                using var bmp = new System.Drawing.Bitmap(mem);
-                var hIcon = bmp.GetHicon();
-                var icon = System.Drawing.Icon.FromHandle(hIcon);
-                IconCache[badgeKind] = icon;
-                return icon;
-            }
-        }
-        catch
-        {
-            // Fallback
-        }
-
-        try
-        {
-            var fallbackUri = new Uri("pack://application:,,,/Assets/Icons/idle.png", UriKind.Absolute);
-            var fallbackStream = Application.GetResourceStream(fallbackUri);
-            if (fallbackStream != null)
-            {
-                using var mem = new MemoryStream();
-                fallbackStream.Stream.CopyTo(mem);
-                mem.Position = 0;
-                using var bmp = new System.Drawing.Bitmap(mem);
-                var hIcon = bmp.GetHicon();
-                var icon = System.Drawing.Icon.FromHandle(hIcon);
-                return icon;
-            }
-        }
-        catch
-        {
-            // Fallback
-        }
-
-        return System.Drawing.SystemIcons.Application;
+        var created = TryCreateOwnedIcon(key) ??
+                      (key == "idle" ? null : TryCreateOwnedIcon("idle")) ??
+                      (System.Drawing.Icon)System.Drawing.SystemIcons.Application.Clone();
+        var winner = IconCache.GetOrAdd(key, created);
+        if (!ReferenceEquals(winner, created)) created.Dispose();
+        return winner;
     }
+
+    public static void DisposeCachedIcons()
+    {
+        foreach (var entry in IconCache)
+            entry.Value.Dispose();
+        IconCache.Clear();
+        ImageCache.Clear();
+    }
+
+    private static ImageSource? TryLoadImage(string key)
+    {
+        try
+        {
+            var uri = new Uri($"pack://application:,,,/Assets/Icons/{key}.png", UriKind.Absolute);
+            var bitmap = new BitmapImage(uri);
+            bitmap.Freeze();
+            return bitmap;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static System.Drawing.Icon? TryCreateOwnedIcon(string key)
+    {
+        try
+        {
+            var uri = new Uri($"pack://application:,,,/Assets/Icons/{key}.png", UriKind.Absolute);
+            var streamInfo = Application.GetResourceStream(uri);
+            if (streamInfo == null) return null;
+
+            using var resourceStream = streamInfo.Stream;
+            using var memory = new MemoryStream();
+            resourceStream.CopyTo(memory);
+            memory.Position = 0;
+            using var bitmap = new System.Drawing.Bitmap(memory);
+            var nativeHandle = bitmap.GetHicon();
+            try
+            {
+                var borrowed = System.Drawing.Icon.FromHandle(nativeHandle);
+                return (System.Drawing.Icon)borrowed.Clone();
+            }
+            finally
+            {
+                DestroyIcon(nativeHandle);
+            }
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string NormalizeBadgeKind(string? badgeKind) =>
+        string.IsNullOrWhiteSpace(badgeKind) || badgeKind.Equals("standby", StringComparison.OrdinalIgnoreCase)
+            ? "idle"
+            : badgeKind.Trim().ToLowerInvariant();
 }

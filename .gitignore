@@ -1,6 +1,11 @@
 # Secrets & authentication keys (never commit personal Sony keys!)
 session_keys.json
+credentials*.json
+credentials*.dat
+*.har
 *.key
+*.pfx
+*.p12
 
 # Logs
 *.log
@@ -28,11 +33,14 @@ env/
 [Oo]bj/
 publish/
 publish-fd/
+TestResults/
+.dotnet/
 *.user
 *.suo
 
 # IDE & OS files
 .idea/
 .vscode/
+.vs/
 .DS_Store
 Thumbs.db

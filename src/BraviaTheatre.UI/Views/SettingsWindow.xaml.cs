@@ -6,7 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using BraviaTheatre.UI.Models;
-using Microsoft.Win32;
+using BraviaTheatre.UI.Services;
 
 namespace BraviaTheatre.UI.Views;
 
@@ -27,8 +27,7 @@ public partial class SettingsWindow : Window
         string verStr = ver != null ? $"{ver.Major}.{ver.Minor}.{ver.Build}" : "2.1.0";
         TxtAppVersion.Text = $"BRAVIA Theatre PC v{verStr}";
 
-        ChkStartWithWindows.IsChecked = _settings.StartWithWindows;
-        ChkAlwaysShowOnTaskbar.IsChecked = _settings.AlwaysShowOnTaskbar;
+        ChkStartWithWindows.IsChecked = AutoStartService.IsAutoStartEnabled();
         ChkShowRearSpeaker.IsChecked = _settings.ShowRearSpeaker;
         ChkEnableGlobalHotkeys.IsChecked = _settings.EnableGlobalHotkeys;
 
@@ -38,6 +37,8 @@ public partial class SettingsWindow : Window
         TxtHotkeySoundField.Text = _settings.HotkeySoundField;
         TxtHotkeyVoiceMode.Text = _settings.HotkeyVoiceMode;
         TxtHotkeyNightMode.Text = _settings.HotkeyNightMode;
+        TxtStaticHost.Text = _settings.StaticHost ?? "";
+        TxtStaticPort.Text = _settings.StaticPort.ToString();
 
         // Logging Level
         foreach (ComboBoxItem item in CboLogLevel.Items)
@@ -119,27 +120,61 @@ public partial class SettingsWindow : Window
 
     private void BtnSave_Click(object sender, RoutedEventArgs e)
     {
-        _settings.StartWithWindows = ChkStartWithWindows.IsChecked ?? false;
-        _settings.AlwaysShowOnTaskbar = ChkAlwaysShowOnTaskbar.IsChecked ?? true;
-        _settings.ShowRearSpeaker = ChkShowRearSpeaker.IsChecked ?? false;
-        _settings.EnableGlobalHotkeys = ChkEnableGlobalHotkeys.IsChecked ?? true;
+        if (!int.TryParse(TxtStaticPort.Text.Trim(), out var port) || port is < 1 or > 65535)
+        {
+            MessageBox.Show(this, "Connection port must be a number between 1 and 65535.", "Invalid Settings",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            TxtStaticPort.Focus();
+            return;
+        }
 
-        _settings.HotkeyVolumeUp = string.IsNullOrWhiteSpace(TxtHotkeyVolUp.Text) ? "Ctrl + Alt + Up" : TxtHotkeyVolUp.Text;
-        _settings.HotkeyVolumeDown = string.IsNullOrWhiteSpace(TxtHotkeyVolDown.Text) ? "Ctrl + Alt + Down" : TxtHotkeyVolDown.Text;
-        _settings.HotkeyMute = string.IsNullOrWhiteSpace(TxtHotkeyMute.Text) ? "Ctrl + Alt + M" : TxtHotkeyMute.Text;
-        _settings.HotkeySoundField = string.IsNullOrWhiteSpace(TxtHotkeySoundField.Text) ? "Ctrl + Alt + S" : TxtHotkeySoundField.Text;
-        _settings.HotkeyVoiceMode = string.IsNullOrWhiteSpace(TxtHotkeyVoiceMode.Text) ? "Ctrl + Alt + V" : TxtHotkeyVoiceMode.Text;
-        _settings.HotkeyNightMode = string.IsNullOrWhiteSpace(TxtHotkeyNightMode.Text) ? "Ctrl + Alt + N" : TxtHotkeyNightMode.Text;
+        var updated = new AppSettings
+        {
+            StartWithWindows = ChkStartWithWindows.IsChecked ?? false,
+            AlwaysShowOnTaskbar = false,
+            ShowRearSpeaker = ChkShowRearSpeaker.IsChecked ?? false,
+            EnableGlobalHotkeys = ChkEnableGlobalHotkeys.IsChecked ?? true,
+            HotkeyVolumeUp = TxtHotkeyVolUp.Text.Trim(),
+            HotkeyVolumeDown = TxtHotkeyVolDown.Text.Trim(),
+            HotkeyMute = TxtHotkeyMute.Text.Trim(),
+            HotkeySoundField = TxtHotkeySoundField.Text.Trim(),
+            HotkeyVoiceMode = TxtHotkeyVoiceMode.Text.Trim(),
+            HotkeyNightMode = TxtHotkeyNightMode.Text.Trim(),
+            StaticHost = TxtStaticHost.Text.Trim(),
+            StaticPort = port,
+            LogLevel = _settings.LogLevel
+        };
 
         if (CboLogLevel.SelectedItem is ComboBoxItem selectedItem && selectedItem.Tag != null)
         {
-            _settings.LogLevel = selectedItem.Tag.ToString()!;
+            updated.LogLevel = selectedItem.Tag.ToString()!;
         }
 
-        ApplyStartupRegistry(_settings.StartWithWindows);
+        var validation = GlobalHotkeyService.ValidateSettings(updated);
+        if (!validation.Success)
+        {
+            MessageBox.Show(this, validation.Message, "Invalid Global Hotkeys",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
 
-        _settings.Save();
-        SettingsSaved?.Invoke(_settings);
+        var previousAutoStart = AutoStartService.IsAutoStartEnabled();
+        if (!AutoStartService.TrySetAutoStart(updated.StartWithWindows, out var startupError))
+        {
+            MessageBox.Show(this, startupError, "Could Not Save Startup Setting",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        if (!updated.TrySave(out var saveError))
+        {
+            AutoStartService.TrySetAutoStart(previousAutoStart, out _);
+            MessageBox.Show(this, saveError, "Could Not Save Settings",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        SettingsSaved?.Invoke(updated);
         Close();
     }
 
@@ -163,25 +198,4 @@ public partial class SettingsWindow : Window
         catch { }
     }
 
-    private static void ApplyStartupRegistry(bool enable)
-    {
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
-            if (key == null) return;
-
-            string exePath = Environment.ProcessPath ?? "";
-            if (string.IsNullOrEmpty(exePath)) return;
-
-            if (enable)
-            {
-                key.SetValue("BraviaTheatrePC", $"\"{exePath}\"");
-            }
-            else
-            {
-                key.DeleteValue("BraviaTheatrePC", false);
-            }
-        }
-        catch { }
-    }
 }

@@ -17,8 +17,8 @@ public sealed record SoundbarState
     public string? Input { get; init; }
     public string? DeviceName { get; init; }
 
-    public string CodecBadgeKind => Power ? CodecTaxonomy.Classify(Codec) : "standby";
-    public string HumanCodec => Power ? CodecTaxonomy.FormatHumanReadable(Codec, Channel) : "Standby";
+    public string CodecBadgeKind => !Connected ? "idle" : Power ? CodecTaxonomy.Classify(Codec) : "standby";
+    public string HumanCodec => !Connected ? "Offline" : Power ? CodecTaxonomy.FormatHumanReadable(Codec, Channel) : "Standby";
 
     public static SoundbarState Disconnected => new()
     {

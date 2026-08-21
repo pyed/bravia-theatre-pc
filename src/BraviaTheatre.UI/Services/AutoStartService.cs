@@ -1,6 +1,5 @@
 using System;
 using System.Diagnostics;
-using System.IO;
 using Microsoft.Win32;
 
 namespace BraviaTheatre.UI.Services;
@@ -8,21 +7,18 @@ namespace BraviaTheatre.UI.Services;
 public static class AutoStartService
 {
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string NotifyKeyPath = @"Control Panel\NotifyIconSettings";
     private const string AppRegName = "BraviaTheatrePC";
 
-    public static string GetExecutablePath()
-    {
-        return Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ?? "BraviaTheatrePC.exe";
-    }
+    public static string GetExecutablePath() =>
+        Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ?? "BraviaTheatrePC.exe";
 
     public static bool IsAutoStartEnabled()
     {
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, false);
-            var val = key?.GetValue(AppRegName) as string;
-            return !string.IsNullOrEmpty(val);
+            var registered = NormalizeCommand(key?.GetValue(AppRegName) as string);
+            return string.Equals(registered, GetExecutablePath(), StringComparison.OrdinalIgnoreCase);
         }
         catch
         {
@@ -30,17 +26,21 @@ public static class AutoStartService
         }
     }
 
-    public static bool SetAutoStart(bool enable)
+    public static bool TrySetAutoStart(bool enable, out string? error)
     {
+        error = null;
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, true);
-            if (key == null) return false;
-
+            using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath, true);
             if (enable)
             {
-                var exePath = GetExecutablePath();
-                key.SetValue(AppRegName, $"\"{exePath}\"", RegistryValueKind.String);
+                var executablePath = GetExecutablePath();
+                if (string.IsNullOrWhiteSpace(executablePath))
+                {
+                    error = "Windows could not determine the application executable path.";
+                    return false;
+                }
+                key.SetValue(AppRegName, $"\"{executablePath}\"", RegistryValueKind.String);
             }
             else
             {
@@ -48,78 +48,25 @@ public static class AutoStartService
             }
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            error = $"Could not update Windows startup settings: {ex.Message}";
             return false;
         }
     }
 
-    public static bool IsTrayPromoted()
+    public static bool SetAutoStart(bool enable) => TrySetAutoStart(enable, out _);
+
+    private static string? NormalizeCommand(string? value)
     {
-        var target = Path.GetFileName(GetExecutablePath()).ToLowerInvariant();
-
-        try
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var trimmed = value.Trim();
+        if (trimmed.Length >= 2 && trimmed[0] == '"')
         {
-            using var rootKey = Registry.CurrentUser.OpenSubKey(NotifyKeyPath, false);
-            if (rootKey == null) return false;
-
-            foreach (var subName in rootKey.GetSubKeyNames())
-            {
-                using var subKey = rootKey.OpenSubKey(subName, false);
-                if (subKey == null) continue;
-
-                var exePath = subKey.GetValue("ExecutablePath") as string;
-                if (!string.IsNullOrEmpty(exePath))
-                {
-                    var lower = exePath.ToLowerInvariant();
-                    if (lower.Contains("braviatheatre") || Path.GetFileName(lower) == target)
-                    {
-                        var isPromoted = subKey.GetValue("IsPromoted");
-                        if (isPromoted is int val && val == 1)
-                            return true;
-                    }
-                }
-            }
+            var closingQuote = trimmed.IndexOf('"', 1);
+            return closingQuote > 1 ? trimmed[1..closingQuote] : null;
         }
-        catch
-        {
-            // Ignore
-        }
-        return false;
-    }
-
-    public static bool SetTrayPromoted(bool enable)
-    {
-        var target = Path.GetFileName(GetExecutablePath()).ToLowerInvariant();
-        int val = enable ? 1 : 0;
-        bool updated = false;
-
-        try
-        {
-            using var rootKey = Registry.CurrentUser.OpenSubKey(NotifyKeyPath, true);
-            if (rootKey == null) return false;
-
-            foreach (var subName in rootKey.GetSubKeyNames())
-            {
-                using var subKey = rootKey.OpenSubKey(subName, true);
-                if (subKey == null) continue;
-
-                var exePath = subKey.GetValue("ExecutablePath") as string;
-                if (!string.IsNullOrEmpty(exePath))
-                {
-                    var lower = exePath.ToLowerInvariant();
-                    if (lower.Contains("braviatheatre") || Path.GetFileName(lower) == target)
-                    {
-                        subKey.SetValue("IsPromoted", val, RegistryValueKind.DWord);
-                        updated = true;
-                    }
-                }
-            }
-        }
-        catch
-        {
-            // Ignore
-        }
-        return updated;
+        var firstSpace = trimmed.IndexOf(' ');
+        return firstSpace > 0 ? trimmed[..firstSpace] : trimmed;
     }
 }

@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+      - "fix/**"
+      - "codex/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan for committed credentials
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          # v8.30.1 has a confirmed default-rule regression; keep the last
+          # known-good scanner until an upstream fixed release is available.
+          GITLEAKS_VERSION: 8.29.0
+
+  build-test:
+    name: Build, test, and publish smoke test
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET 10 SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.302
+
+      - name: Restore dependencies
+        run: dotnet restore BraviaTheatrePC.sln
+
+      - name: Verify formatting
+        run: dotnet format BraviaTheatrePC.sln --verify-no-changes --no-restore
+
+      - name: Build Release
+        run: dotnet build BraviaTheatrePC.sln -c Release --no-restore -warnaserror
+
+      - name: Run tests
+        run: dotnet test BraviaTheatrePC.sln -c Release --no-build --collect:"XPlat Code Coverage"
+
+      - name: Audit NuGet packages
+        run: dotnet package list --project BraviaTheatrePC.sln --vulnerable --include-transitive
+
+      - name: Smoke-test standalone publish
+        run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o artifacts/standalone
+
+      - name: Smoke-test framework-dependent publish
+        run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --no-self-contained -p:PublishSingleFile=true -p:DebugType=none -o artifacts/framework-dependent
+
+      - name: Verify publish outputs
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath "artifacts/standalone/BraviaTheatrePC.exe")) { throw "Standalone executable was not published." }
+          if (-not (Test-Path -LiteralPath "artifacts/framework-dependent/BraviaTheatrePC.exe")) { throw "Framework-dependent executable was not published." }

@@ -1,27 +1,33 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using BraviaTheatre.Core.Auth;
+using BraviaTheatre.UI.Services;
 using Microsoft.Web.WebView2.Core;
 
 namespace BraviaTheatre.UI.Views;
 
 public partial class AuthDialog : Window
 {
-    private readonly string _keysPath;
+    private readonly SonyCredentialStore _credentialStore;
+    private readonly CancellationTokenSource _lifetimeCts = new();
     private string? _codeVerifier;
     private string? _expectedState;
     private string? _authUrl;
     private bool _isManualMode = false;
     private bool _isProcessing = false;
+    private bool _isClosed;
 
-    public AuthDialog(string keysPath)
+    public AuthDialog(SonyCredentialStore credentialStore)
     {
         InitializeComponent();
-        _keysPath = keysPath;
+        _credentialStore = credentialStore;
     }
+
+    public SonyCredentials? AuthenticatedCredentials { get; private set; }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
@@ -31,10 +37,17 @@ public partial class AuthDialog : Window
         _codeVerifier = codeVerifier;
         _expectedState = state;
 
-        await InitializeAutoLoginAsync();
+        try
+        {
+            await InitializeAutoLoginAsync(_lifetimeCts.Token);
+        }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
+        {
+            // Window is closing.
+        }
     }
 
-    private async Task InitializeAutoLoginAsync()
+    private async Task InitializeAutoLoginAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -48,34 +61,29 @@ public partial class AuthDialog : Window
             }
 
             var env = await CoreWebView2Environment.CreateAsync(userDataFolder: webViewDataFolder);
+            cancellationToken.ThrowIfCancellationRequested();
             await AuthWebView.EnsureCoreWebView2Async(env);
+            cancellationToken.ThrowIfCancellationRequested();
 
             AuthWebView.CoreWebView2.Settings.IsStatusBarEnabled = false;
             AuthWebView.CoreWebView2.Settings.AreDevToolsEnabled = false;
+            AuthWebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+            AuthWebView.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = false;
+            AuthWebView.CoreWebView2.Settings.IsPasswordAutosaveEnabled = false;
 
             // Intercept the custom scheme redirect callback
-            AuthWebView.CoreWebView2.NavigationStarting += async (s, args) =>
-            {
-                if (args.Uri.StartsWith("ssh-app://signin", StringComparison.OrdinalIgnoreCase))
-                {
-                    args.Cancel = true; // Prevent standard navigation error page
-                    await ProcessAuthCallbackAsync(args.Uri);
-                }
-            };
-
-            AuthWebView.NavigationCompleted += (s, args) =>
-            {
-                if (!_isProcessing)
-                {
-                    OverlayProgress.Visibility = Visibility.Collapsed;
-                }
-            };
+            AuthWebView.CoreWebView2.NavigationStarting += CoreWebView2_NavigationStarting;
+            AuthWebView.NavigationCompleted += AuthWebView_NavigationCompleted;
 
             AuthWebView.Source = new Uri(_authUrl!);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            App.Log($"WebView2 initialization failed, falling back to manual mode: {ex.Message}");
+            App.Log($"WebView2 initialization failed ({ex.GetType().Name}); falling back to manual mode.");
             SwitchToManualMode();
         }
     }
@@ -87,7 +95,7 @@ public partial class AuthDialog : Window
 
         if (string.IsNullOrWhiteSpace(codeOrUrl))
         {
-            MessageBox.Show("Please enter the authorization code or redirect URL.", "Input Required", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, "Please paste the complete Sony callback URL.", "Input Required", MessageBoxButton.OK, MessageBoxImage.Warning);
             _isProcessing = false;
             return;
         }
@@ -105,12 +113,31 @@ public partial class AuthDialog : Window
 
         try
         {
-            var creds = await SonyOAuth.CompleteOAuthFlowAsync(codeOrUrl, _codeVerifier, _expectedState);
-            creds.SaveToFile(_keysPath);
+            var creds = await SonyOAuth.CompleteOAuthFlowAsync(
+                codeOrUrl,
+                _codeVerifier,
+                _expectedState,
+                _lifetimeCts.Token,
+                SelectDeviceAsync);
+
+            if (!_credentialStore.TrySave(creds, out var saveError))
+                throw new InvalidOperationException(saveError ?? "Could not save protected Sony credentials.");
 
             App.Log("OAuth flow and local key exchange completed successfully.");
+            AuthenticatedCredentials = creds;
+            if (_isClosed) return;
             DialogResult = true;
             Close();
+        }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested || _isClosed)
+        {
+            // Closing/canceling the dialog is not an authentication error.
+        }
+        catch (OperationCanceledException)
+        {
+            _isProcessing = false;
+            OverlayProgress.Visibility = Visibility.Collapsed;
+            BtnManualComplete.IsEnabled = true;
         }
         catch (Exception ex)
         {
@@ -118,7 +145,10 @@ public partial class AuthDialog : Window
             OverlayProgress.Visibility = Visibility.Collapsed;
             BtnManualComplete.IsEnabled = true;
 
-            MessageBox.Show($"Authentication and key exchange failed:\n\n{ex.Message}", "Authentication Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            var detail = ex is InvalidOperationException or ArgumentException
+                ? ex.Message
+                : "Sony sign-in could not be completed. Please try again.";
+            MessageBox.Show($"Authentication and key exchange failed:\n\n{detail}", "Authentication Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -136,9 +166,10 @@ public partial class AuthDialog : Window
 
             Process.Start(new ProcessStartInfo(_authUrl) { UseShellExecute = true });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            MessageBox.Show($"Failed to launch sign-in URL: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show("Failed to open the Sony sign-in page in your browser.",
+                "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -181,7 +212,66 @@ public partial class AuthDialog : Window
 
     private void BtnCancel_Click(object sender, RoutedEventArgs e)
     {
+        _lifetimeCts.Cancel();
         DialogResult = false;
         Close();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _isClosed = true;
+        _lifetimeCts.Cancel();
+        try
+        {
+            if (AuthWebView.CoreWebView2 != null)
+                AuthWebView.CoreWebView2.NavigationStarting -= CoreWebView2_NavigationStarting;
+            AuthWebView.NavigationCompleted -= AuthWebView_NavigationCompleted;
+            AuthWebView.Dispose();
+        }
+        catch
+        {
+            // The WebView may be only partially initialized.
+        }
+        _lifetimeCts.Dispose();
+        base.OnClosed(e);
+    }
+
+    private async void CoreWebView2_NavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs args)
+    {
+        if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) ||
+            !uri.Scheme.Equals("ssh-app", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        args.Cancel = true;
+        if (!uri.Host.Equals("signin", StringComparison.OrdinalIgnoreCase))
+        {
+            MessageBox.Show(this, "Sony returned an unexpected callback address. Start sign-in again.",
+                "Authentication Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        await ProcessAuthCallbackAsync(args.Uri);
+    }
+
+    private void AuthWebView_NavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs args)
+    {
+        if (!_isProcessing && !_isClosed)
+            OverlayProgress.Visibility = Visibility.Collapsed;
+    }
+
+    private Task<string?> SelectDeviceAsync(
+        System.Collections.Generic.IReadOnlyList<SonyDeviceInfo> devices,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!Dispatcher.CheckAccess())
+        {
+            return Dispatcher.InvokeAsync(() => SelectDeviceAsync(devices, cancellationToken)).Task.Unwrap();
+        }
+
+        var dialog = new DeviceSelectionDialog(devices) { Owner = this };
+        return Task.FromResult(dialog.ShowDialog() == true ? dialog.SelectedDeviceId : null);
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -6,6 +7,8 @@ using BraviaTheatre.Core.Engine;
 using BraviaTheatre.UI.Models;
 
 namespace BraviaTheatre.UI.Services;
+
+public sealed record HotkeyOperationResult(bool Success, string Message, bool PreviousBindingsRestored = false);
 
 public sealed class GlobalHotkeyService : IDisposable
 {
@@ -30,49 +33,105 @@ public sealed class GlobalHotkeyService : IDisposable
     private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
     private readonly BraviaEngine _engine;
+    private readonly HashSet<int> _registeredIds = new();
     private HwndSource? _hwndSource;
-    private bool _isRegistered;
+    private AppSettings? _registeredSettings;
 
     public GlobalHotkeyService(BraviaEngine engine)
     {
         _engine = engine;
     }
 
-    public void Register(AppSettings settings)
+    public static HotkeyOperationResult ValidateSettings(AppSettings settings)
     {
-        Unregister();
+        if (!settings.EnableGlobalHotkeys)
+            return new HotkeyOperationResult(true, "Global hotkeys are disabled.");
 
-        if (!settings.EnableGlobalHotkeys) return;
-
-        var parameters = new HwndSourceParameters("BraviaHotkeyMsgSink")
+        var seen = new Dictionary<(uint Modifiers, uint Key), string>();
+        foreach (var binding in GetBindings(settings))
         {
-            Width = 0,
-            Height = 0,
-            PositionX = 0,
-            PositionY = 0,
-            WindowStyle = 0
-        };
+            if (string.IsNullOrWhiteSpace(binding.Value)) continue;
+            if (!TryParseHotkey(binding.Value, out var modifiers, out var key))
+            {
+                return new HotkeyOperationResult(false,
+                    $"{binding.Name} is not a valid global shortcut. Use at least one modifier (Ctrl, Alt, Shift, or Win) plus one key, or clear it to disable that shortcut.");
+            }
 
-        _hwndSource = new HwndSource(parameters);
-        _hwndSource.AddHook(HwndHook);
+            var normalized = (modifiers & ~MOD_NOREPEAT, key);
+            if (seen.TryGetValue(normalized, out var existing))
+            {
+                return new HotkeyOperationResult(false,
+                    $"{binding.Name} duplicates {existing}. Each global shortcut must be unique.");
+            }
+            seen[normalized] = binding.Name;
+        }
 
-        var hwnd = _hwndSource.Handle;
-
-        RegisterSingle(hwnd, HOTKEY_VOL_UP, settings.HotkeyVolumeUp);
-        RegisterSingle(hwnd, HOTKEY_VOL_DOWN, settings.HotkeyVolumeDown);
-        RegisterSingle(hwnd, HOTKEY_MUTE, settings.HotkeyMute);
-        RegisterSingle(hwnd, HOTKEY_SOUND_FIELD, settings.HotkeySoundField);
-        RegisterSingle(hwnd, HOTKEY_VOICE_MODE, settings.HotkeyVoiceMode);
-        RegisterSingle(hwnd, HOTKEY_NIGHT_MODE, settings.HotkeyNightMode);
-
-        _isRegistered = true;
+        return new HotkeyOperationResult(true, "Global hotkeys are valid.");
     }
 
-    private static void RegisterSingle(IntPtr hwnd, int id, string hotkeyStr)
+    public HotkeyOperationResult Register(AppSettings settings)
     {
-        if (TryParseHotkey(hotkeyStr, out var mods, out var vk))
+        var validation = ValidateSettings(settings);
+        if (!validation.Success) return validation;
+
+        var previous = _registeredSettings;
+        UnregisterCore(clearSnapshot: false);
+
+        if (!settings.EnableGlobalHotkeys)
         {
-            RegisterHotKey(hwnd, id, mods, vk);
+            _registeredSettings = null;
+            return new HotkeyOperationResult(true, "Global hotkeys are disabled.");
+        }
+
+        var result = RegisterCore(settings);
+        if (result.Success)
+        {
+            _registeredSettings = CloneSettings(settings);
+            return result;
+        }
+
+        UnregisterCore(clearSnapshot: false);
+        var restored = previous != null && RegisterCore(previous).Success;
+        if (!restored) UnregisterCore(clearSnapshot: false);
+        _registeredSettings = restored ? previous : null;
+        return result with { PreviousBindingsRestored = restored };
+    }
+
+    private HotkeyOperationResult RegisterCore(AppSettings settings)
+    {
+        try
+        {
+            var parameters = new HwndSourceParameters("BraviaHotkeyMsgSink")
+            {
+                Width = 0,
+                Height = 0,
+                PositionX = 0,
+                PositionY = 0,
+                WindowStyle = 0
+            };
+
+            _hwndSource = new HwndSource(parameters);
+            _hwndSource.AddHook(HwndHook);
+            var hwnd = _hwndSource.Handle;
+
+            foreach (var binding in GetBindings(settings))
+            {
+                if (string.IsNullOrWhiteSpace(binding.Value)) continue;
+                TryParseHotkey(binding.Value, out var modifiers, out var key);
+                if (!RegisterHotKey(hwnd, binding.Id, modifiers, key))
+                {
+                    var error = Marshal.GetLastWin32Error();
+                    return new HotkeyOperationResult(false,
+                        $"Windows could not register {binding.Name} ({binding.Value}). It may already be used by another app. Win32 error: {error}.");
+                }
+                _registeredIds.Add(binding.Id);
+            }
+
+            return new HotkeyOperationResult(true, "Global hotkeys registered.");
+        }
+        catch (Exception ex)
+        {
+            return new HotkeyOperationResult(false, $"Could not initialize global hotkeys: {ex.Message}");
         }
     }
 
@@ -80,26 +139,31 @@ public sealed class GlobalHotkeyService : IDisposable
     {
         modifiers = MOD_NOREPEAT;
         vk = 0;
-
-        if (string.IsNullOrWhiteSpace(hotkeyStr))
-            return false;
+        if (string.IsNullOrWhiteSpace(hotkeyStr)) return false;
 
         var parts = hotkeyStr.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 0) return false;
+        if (parts.Length < 2) return false;
 
-        string keyPart = parts[^1];
-
-        for (int i = 0; i < parts.Length - 1; i++)
+        var actualModifiers = 0u;
+        for (var index = 0; index < parts.Length - 1; index++)
         {
-            var mod = parts[i].ToLowerInvariant();
-            if (mod is "ctrl" or "control") modifiers |= MOD_CONTROL;
-            else if (mod is "alt") modifiers |= MOD_ALT;
-            else if (mod is "shift") modifiers |= MOD_SHIFT;
-            else if (mod is "win" or "windows") modifiers |= MOD_WIN;
+            var flag = parts[index].ToLowerInvariant() switch
+            {
+                "ctrl" or "control" => MOD_CONTROL,
+                "alt" => MOD_ALT,
+                "shift" => MOD_SHIFT,
+                "win" or "windows" => MOD_WIN,
+                _ => 0u
+            };
+            if (flag == 0 || (actualModifiers & flag) != 0) return false;
+            actualModifiers |= flag;
         }
+        if (actualModifiers == 0) return false;
 
-        vk = ParseKeyToVk(keyPart);
-        return vk != 0;
+        vk = ParseKeyToVk(parts[^1]);
+        if (vk == 0) return false;
+        modifiers |= actualModifiers;
+        return true;
     }
 
     private static uint ParseKeyToVk(string keyName)
@@ -107,7 +171,7 @@ public sealed class GlobalHotkeyService : IDisposable
         keyName = keyName.Trim();
         if (Enum.TryParse<Key>(keyName, true, out var key))
         {
-            int rawVk = KeyInterop.VirtualKeyFromKey(key);
+            var rawVk = KeyInterop.VirtualKeyFromKey(key);
             if (rawVk > 0) return (uint)rawVk;
         }
 
@@ -117,74 +181,80 @@ public sealed class GlobalHotkeyService : IDisposable
             "down" or "downarrow" => 0x28,
             "left" or "leftarrow" => 0x25,
             "right" or "rightarrow" => 0x27,
-            "m" => 0x4D,
-            "s" => 0x53,
-            "v" => 0x56,
-            "n" => 0x4E,
-            "b" => 0x42,
-            "p" => 0x50,
             _ => (uint)(keyName.Length == 1 ? char.ToUpperInvariant(keyName[0]) : 0)
         };
     }
 
-    public void Unregister()
+    public void Unregister() => UnregisterCore(clearSnapshot: true);
+
+    private void UnregisterCore(bool clearSnapshot)
     {
-        if (!_isRegistered || _hwndSource == null) return;
-
-        var hwnd = _hwndSource.Handle;
-        UnregisterHotKey(hwnd, HOTKEY_VOL_UP);
-        UnregisterHotKey(hwnd, HOTKEY_VOL_DOWN);
-        UnregisterHotKey(hwnd, HOTKEY_MUTE);
-        UnregisterHotKey(hwnd, HOTKEY_SOUND_FIELD);
-        UnregisterHotKey(hwnd, HOTKEY_VOICE_MODE);
-        UnregisterHotKey(hwnd, HOTKEY_NIGHT_MODE);
-
-        _hwndSource.RemoveHook(HwndHook);
-        _hwndSource.Dispose();
-        _hwndSource = null;
-        _isRegistered = false;
+        if (_hwndSource != null)
+        {
+            var hwnd = _hwndSource.Handle;
+            foreach (var id in _registeredIds)
+                UnregisterHotKey(hwnd, id);
+            _registeredIds.Clear();
+            _hwndSource.RemoveHook(HwndHook);
+            _hwndSource.Dispose();
+            _hwndSource = null;
+        }
+        if (clearSnapshot) _registeredSettings = null;
     }
 
     private IntPtr HwndHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg == WM_HOTKEY)
+        if (msg != WM_HOTKEY) return IntPtr.Zero;
+
+        handled = true;
+        switch (wParam.ToInt32())
         {
-            int id = wParam.ToInt32();
-            switch (id)
-            {
-                case HOTKEY_VOL_UP:
-                    int newVolUp = Math.Clamp(_engine.CurrentState.Volume + 2, 0, 100);
-                    _ = _engine.SetVolumeAsync(newVolUp);
-                    handled = true;
-                    break;
-                case HOTKEY_VOL_DOWN:
-                    int newVolDown = Math.Clamp(_engine.CurrentState.Volume - 2, 0, 100);
-                    _ = _engine.SetVolumeAsync(newVolDown);
-                    handled = true;
-                    break;
-                case HOTKEY_MUTE:
-                    _ = _engine.ToggleMuteAsync();
-                    handled = true;
-                    break;
-                case HOTKEY_SOUND_FIELD:
-                    _ = _engine.ToggleSoundFieldAsync();
-                    handled = true;
-                    break;
-                case HOTKEY_VOICE_MODE:
-                    _ = _engine.ToggleVoiceModeAsync();
-                    handled = true;
-                    break;
-                case HOTKEY_NIGHT_MODE:
-                    _ = _engine.ToggleNightModeAsync();
-                    handled = true;
-                    break;
-            }
+            case HOTKEY_VOL_UP:
+                _ = _engine.SetVolumeAsync(Math.Clamp(_engine.CurrentState.Volume + 2, 0, 100));
+                break;
+            case HOTKEY_VOL_DOWN:
+                _ = _engine.SetVolumeAsync(Math.Clamp(_engine.CurrentState.Volume - 2, 0, 100));
+                break;
+            case HOTKEY_MUTE:
+                _ = _engine.ToggleMuteAsync();
+                break;
+            case HOTKEY_SOUND_FIELD:
+                _ = _engine.ToggleSoundFieldAsync();
+                break;
+            case HOTKEY_VOICE_MODE:
+                _ = _engine.ToggleVoiceModeAsync();
+                break;
+            case HOTKEY_NIGHT_MODE:
+                _ = _engine.ToggleNightModeAsync();
+                break;
+            default:
+                handled = false;
+                break;
         }
         return IntPtr.Zero;
     }
 
-    public void Dispose()
+    private static IReadOnlyList<(int Id, string Name, string Value)> GetBindings(AppSettings settings) =>
+        new[]
+        {
+            (HOTKEY_VOL_UP, "Volume Up", settings.HotkeyVolumeUp),
+            (HOTKEY_VOL_DOWN, "Volume Down", settings.HotkeyVolumeDown),
+            (HOTKEY_MUTE, "Mute", settings.HotkeyMute),
+            (HOTKEY_SOUND_FIELD, "Sound Field", settings.HotkeySoundField),
+            (HOTKEY_VOICE_MODE, "Voice Mode", settings.HotkeyVoiceMode),
+            (HOTKEY_NIGHT_MODE, "Night Mode", settings.HotkeyNightMode)
+        };
+
+    private static AppSettings CloneSettings(AppSettings settings) => new()
     {
-        Unregister();
-    }
+        EnableGlobalHotkeys = settings.EnableGlobalHotkeys,
+        HotkeyVolumeUp = settings.HotkeyVolumeUp,
+        HotkeyVolumeDown = settings.HotkeyVolumeDown,
+        HotkeyMute = settings.HotkeyMute,
+        HotkeySoundField = settings.HotkeySoundField,
+        HotkeyVoiceMode = settings.HotkeyVoiceMode,
+        HotkeyNightMode = settings.HotkeyNightMode
+    };
+
+    public void Dispose() => Unregister();
 }

@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -19,6 +20,7 @@ public partial class FlyoutWindow : Window
     private readonly Action _onOpenSettings;
     private bool _isUpdatingUi;
     private bool _isDraggingSlider;
+    private bool _allowClose;
 
     private static readonly SolidColorBrush GreenBrush = new((Color)ColorConverter.ConvertFromString("#44D644"));
     private static readonly SolidColorBrush BlueBrush = new((Color)ColorConverter.ConvertFromString("#4CC2FF"));
@@ -84,6 +86,32 @@ public partial class FlyoutWindow : Window
             BeginAnimation(OpacityProperty, fadeIn);
             FlyoutTransform.BeginAnimation(TranslateTransform.YProperty, slideUp);
         }
+    }
+
+    public void ShowFlyout()
+    {
+        if (IsVisible)
+        {
+            Activate();
+            return;
+        }
+        ToggleFlyout();
+    }
+
+    public void CloseForShutdown()
+    {
+        _allowClose = true;
+        Close();
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (!_allowClose)
+        {
+            e.Cancel = true;
+            Hide();
+        }
+        base.OnClosing(e);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -233,7 +261,13 @@ public partial class FlyoutWindow : Window
             // Input Function
             string fn = state.Function.ToUpperInvariant();
             BtnInputSource.Content = $"{fn} ▾";
-            TxtInput.Text = $"{fn} / eARC";
+            TxtInput.Text = state.Function.ToLowerInvariant() switch
+            {
+                "tv" => "TV / eARC",
+                "bluetooth" => "Bluetooth",
+                "hdmi" => "HDMI",
+                _ => fn
+            };
 
             ImgCodecBadge.Source = IconHelper.GetImageSource(state.CodecBadgeKind);
             TxtCodecName.Text = state.HumanCodec;
@@ -253,7 +287,17 @@ public partial class FlyoutWindow : Window
                 SliderVolume.Value = state.Volume;
                 TxtVolumeValue.Text = state.Volume.ToString();
             }
-            SliderVolume.IsEnabled = state.Power;
+            var connectedAndPowered = state.Connected && state.Power;
+            BtnHeaderPower.IsEnabled = state.Connected;
+            BtnInputSource.IsEnabled = connectedAndPowered;
+            BtnSliderMute.IsEnabled = connectedAndPowered;
+            BtnBassMin.IsEnabled = connectedAndPowered;
+            BtnBassMid.IsEnabled = connectedAndPowered;
+            BtnBassMax.IsEnabled = connectedAndPowered;
+            BtnSoundField.IsEnabled = connectedAndPowered;
+            BtnNightMode.IsEnabled = connectedAndPowered;
+            BtnVoiceMode.IsEnabled = connectedAndPowered;
+            SliderVolume.IsEnabled = connectedAndPowered;
 
             // Speaker / Mute icon update (Windows style mute icon in #D0D0D0)
             IconSpeaker.Data = state.Mute ? SpeakerMutedGeometry : SpeakerUnmutedGeometry;
@@ -263,7 +307,7 @@ public partial class FlyoutWindow : Window
 
             SliderRear.Value = state.RearLevel;
             TxtRearValue.Text = state.RearLevel > 0 ? $"+{state.RearLevel}" : state.RearLevel.ToString();
-            SliderRear.IsEnabled = state.Power;
+            SliderRear.IsEnabled = connectedAndPowered;
 
             TxtSoundFieldStatus.Text = state.SoundField ? "On" : "Off";
             TxtSoundFieldStatus.Foreground = state.SoundField ? BlueBrush : GrayBrush;

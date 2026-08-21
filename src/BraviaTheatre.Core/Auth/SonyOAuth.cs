@@ -1,13 +1,23 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
 
 namespace BraviaTheatre.Core.Auth;
+
+public sealed record SonyOAuthCallback(string Code, string State);
+
+public sealed record SonyDeviceInfo(string DeviceId, string DisplayName, string DeviceType);
+
+public delegate Task<string?> SonyDeviceSelector(
+    IReadOnlyList<SonyDeviceInfo> devices,
+    CancellationToken cancellationToken);
 
 public static class SonyOAuth
 {
@@ -120,132 +130,276 @@ public static class SonyOAuth
         return value;
     }
 
-    public static async Task<SonyCredentials> CompleteOAuthFlowAsync(
-        string redirectOrCode,
-        string codeVerifier,
-        string? expectedState = null)
+    public static SonyOAuthCallback ParseAuthorizationCallback(string callbackUri)
     {
-        var authCode = ParseAuthorizationCode(redirectOrCode);
-        if (string.IsNullOrWhiteSpace(authCode))
-            throw new InvalidOperationException("Could not extract a valid authorization code.");
+        var normalizedCallback = callbackUri?.Trim() ?? string.Empty;
+        if (!normalizedCallback.StartsWith("ssh-app://signin?", StringComparison.OrdinalIgnoreCase) ||
+            !Uri.TryCreate(normalizedCallback, UriKind.Absolute, out var uri) ||
+            !uri.Scheme.Equals("ssh-app", StringComparison.OrdinalIgnoreCase) ||
+            !uri.Host.Equals("signin", StringComparison.OrdinalIgnoreCase) ||
+            (uri.AbsolutePath.Length > 0 && uri.AbsolutePath != "/") ||
+            !string.IsNullOrEmpty(uri.UserInfo) ||
+            !uri.IsDefaultPort ||
+            !string.IsNullOrEmpty(uri.Fragment))
+        {
+            throw new InvalidOperationException("Paste the complete Sony callback URL beginning with ssh-app://signin?.");
+        }
 
-        using var client = new HttpClient();
+        var query = HttpUtility.ParseQueryString(uri.Query);
+        var codeValues = query.GetValues("code");
+        var stateValues = query.GetValues("state");
+        if (codeValues is not { Length: 1 } || string.IsNullOrWhiteSpace(codeValues[0]))
+            throw new InvalidOperationException("The Sony callback does not contain one valid authorization code.");
+        if (stateValues is not { Length: 1 } || string.IsNullOrWhiteSpace(stateValues[0]))
+            throw new InvalidOperationException("The Sony callback does not contain the required security state.");
 
-        // 1. Exchange authorization code for tokens
-        var tokenReq = new HttpRequestMessage(HttpMethod.Post, $"{AuthBaseUrl}/token");
-        tokenReq.Headers.Add("User-Agent", TokenUserAgent);
-        tokenReq.Content = new FormUrlEncodedContent(new Dictionary<string, string>
+        return new SonyOAuthCallback(codeValues[0].Trim(), stateValues[0].Trim());
+    }
+
+    public static async Task<SonyCredentials> CompleteOAuthFlowAsync(
+        string callbackUri,
+        string codeVerifier,
+        string? expectedState,
+        CancellationToken cancellationToken = default,
+        SonyDeviceSelector? deviceSelector = null,
+        HttpClient? httpClient = null)
+    {
+        if (string.IsNullOrWhiteSpace(codeVerifier))
+            throw new InvalidOperationException("The OAuth login session is not initialized.");
+        if (string.IsNullOrWhiteSpace(expectedState))
+            throw new InvalidOperationException("The OAuth security state is missing. Start sign-in again.");
+
+        var callback = ParseAuthorizationCallback(callbackUri);
+        if (!FixedTimeEquals(callback.State, expectedState))
+            throw new InvalidOperationException("The OAuth callback security state does not match. Start sign-in again.");
+
+        var ownsClient = httpClient == null;
+        var client = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        try
+        {
+            var accessToken = await ExchangeAuthorizationCodeAsync(
+                client,
+                callback.Code,
+                codeVerifier,
+                cancellationToken).ConfigureAwait(false);
+
+            var devices = await GetDevicesAsync(client, accessToken, cancellationToken).ConfigureAwait(false);
+            var deviceId = await SelectDeviceAsync(devices, deviceSelector, cancellationToken).ConfigureAwait(false);
+            return await FetchSessionKeysAsync(client, accessToken, deviceId, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (ownsClient) client.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Exchanges a refresh token supplied by the caller and rotates the local session keys.
+    /// The refresh token is never returned or persisted by this method.
+    /// </summary>
+    public static async Task<SonyCredentials> RefreshSessionKeysAsync(
+        string refreshToken,
+        string deviceId,
+        CancellationToken cancellationToken = default,
+        HttpClient? httpClient = null)
+    {
+        if (string.IsNullOrWhiteSpace(refreshToken))
+            throw new ArgumentException("A refresh token is required.", nameof(refreshToken));
+        if (string.IsNullOrWhiteSpace(deviceId))
+            throw new ArgumentException("A Sony device ID is required.", nameof(deviceId));
+
+        var ownsClient = httpClient == null;
+        var client = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{AuthBaseUrl}/token");
+            request.Headers.Add("User-Agent", TokenUserAgent);
+            request.Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "refresh_token",
+                ["refresh_token"] = refreshToken,
+                ["client_id"] = ClientId
+            });
+
+            var accessToken = await SendForAccessTokenAsync(client, request, "refresh", cancellationToken).ConfigureAwait(false);
+            return await FetchSessionKeysAsync(client, accessToken, deviceId, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (ownsClient) client.Dispose();
+        }
+    }
+
+    private static async Task<string> ExchangeAuthorizationCodeAsync(
+        HttpClient client,
+        string authorizationCode,
+        string codeVerifier,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{AuthBaseUrl}/token");
+        request.Headers.Add("User-Agent", TokenUserAgent);
+        request.Content = new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["grant_type"] = "authorization_code",
-            ["code"] = authCode,
+            ["code"] = authorizationCode,
             ["redirect_uri"] = RedirectUri,
             ["client_id"] = ClientId,
             ["code_verifier"] = codeVerifier
         });
 
-        var tokenResp = await client.SendAsync(tokenReq);
-        var tokenJson = await tokenResp.Content.ReadAsStringAsync();
+        return await SendForAccessTokenAsync(client, request, "authorization", cancellationToken).ConfigureAwait(false);
+    }
 
-        if (!tokenResp.IsSuccessStatusCode)
+    private static async Task<string> SendForAccessTokenAsync(
+        HttpClient client,
+        HttpRequestMessage request,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+            throw CreateHttpFailure($"Sony token {operation}", response);
+
+        var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            throw new InvalidOperationException(
-                $"Sony Token Exchange Failed (HTTP {(int)tokenResp.StatusCode}):\n{tokenJson}\n\n" +
-                "Please ensure you copied the fresh 'code' right after signing in."
-            );
-        }
-
-        using var tokenDoc = JsonDocument.Parse(tokenJson);
-        if (!tokenDoc.RootElement.TryGetProperty("access_token", out var atProp) || string.IsNullOrEmpty(atProp.GetString()))
-        {
-            throw new InvalidOperationException($"Invalid token response from Sony: {tokenJson}");
-        }
-
-        var accessToken = atProp.GetString()!;
-        var refreshToken = tokenDoc.RootElement.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null;
-
-        // 2. Fetch IoT devices
-        var devReq = new HttpRequestMessage(HttpMethod.Get, $"{IotBaseUrl}/devices");
-        devReq.Headers.Add("User-Agent", IotUserAgent);
-        devReq.Headers.Add("x-api-key", ApiKey);
-        devReq.Headers.Add("Authorization", $"Bearer {accessToken}");
-
-        var devResp = await client.SendAsync(devReq);
-        var devJson = await devResp.Content.ReadAsStringAsync();
-
-        if (!devResp.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException($"Sony Device Query Failed (HTTP {(int)devResp.StatusCode}):\n{devJson}");
-        }
-
-        using var devDoc = JsonDocument.Parse(devJson);
-        if (!devDoc.RootElement.TryGetProperty("devices", out var devices))
-        {
-            throw new InvalidOperationException($"Unexpected device list response: {devJson}");
-        }
-
-        string? deviceId = null;
-        foreach (var dev in devices.EnumerateArray())
-        {
-            var type = dev.TryGetProperty("device_type", out var dt) ? dt.GetString() : null;
-            if (type == "Speaker" || type == "TV" || deviceId == null)
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.TryGetProperty("access_token", out var value) &&
+                !string.IsNullOrWhiteSpace(value.GetString()))
             {
-                if (dev.TryGetProperty("device_id", out var dIdProp))
-                {
-                    deviceId = dIdProp.GetString();
-                    if (type == "Speaker") break; // Prefer soundbar
-                }
+                return value.GetString()!;
             }
         }
-
-        if (string.IsNullOrEmpty(deviceId))
-            throw new InvalidOperationException("No Sony soundbar/speaker or TV found associated with this account.");
-
-        // 3. Fetch gRPC session keys
-        var keysReq = new HttpRequestMessage(HttpMethod.Post, $"{IotBaseUrl}/devices/{deviceId}/session_keys");
-        keysReq.Headers.Add("User-Agent", IotUserAgent);
-        keysReq.Headers.Add("x-api-key", ApiKey);
-        keysReq.Headers.Add("Authorization", $"Bearer {accessToken}");
-
-        var keysResp = await client.SendAsync(keysReq);
-        var keysJson = await keysResp.Content.ReadAsStringAsync();
-
-        if (!keysResp.IsSuccessStatusCode)
+        catch (JsonException)
         {
-            throw new InvalidOperationException($"Sony Session Key Fetch Failed (HTTP {(int)keysResp.StatusCode}):\n{keysJson}");
+            // Converted to a sanitized protocol error below.
         }
 
-        using var keysDoc = JsonDocument.Parse(keysJson);
+        throw new InvalidOperationException("Sony returned an invalid token response. No credentials were stored.");
+    }
 
-        string? sessionId = null;
-        if (keysDoc.RootElement.TryGetProperty("session_id", out var sIdProp))
-            sessionId = sIdProp.GetString();
-        else if (keysDoc.RootElement.TryGetProperty("key_id", out var kIdProp))
-            sessionId = kIdProp.GetString();
+    private static async Task<IReadOnlyList<SonyDeviceInfo>> GetDevicesAsync(
+        HttpClient client,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        using var request = CreateIotRequest(HttpMethod.Get, $"{IotBaseUrl}/devices", accessToken);
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+            throw CreateHttpFailure("Sony device query", response);
 
-        string? hmacKey = null;
-        if (keysDoc.RootElement.TryGetProperty("hmac_key", out var hProp))
-            hmacKey = hProp.GetString();
-        else if (keysDoc.RootElement.TryGetProperty("session_key", out var skProp))
-            hmacKey = skProp.GetString();
-
-        string? cId = null;
-        if (keysDoc.RootElement.TryGetProperty("client_id", out var cProp))
-            cId = cProp.GetString();
-        cId ??= ClientId;
-
-        if (string.IsNullOrEmpty(sessionId) || string.IsNullOrEmpty(hmacKey))
+        var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            throw new InvalidOperationException($"Invalid session keys response from Sony:\n{keysJson}");
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("devices", out var array) || array.ValueKind != JsonValueKind.Array)
+                throw new JsonException();
+
+            var result = new List<SonyDeviceInfo>();
+            foreach (var item in array.EnumerateArray())
+            {
+                var id = GetString(item, "device_id");
+                if (string.IsNullOrWhiteSpace(id)) continue;
+                var type = GetString(item, "device_type") ?? "Sony device";
+                var name = GetString(item, "device_name") ?? GetString(item, "name") ?? GetString(item, "model_name") ?? type;
+                result.Add(new SonyDeviceInfo(id, name, type));
+            }
+            return result;
         }
-
-        return new SonyCredentials
+        catch (JsonException)
         {
-            ClientId = cId,
-            SessionId = sessionId,
-            HmacKey = hmacKey,
-            AccessToken = accessToken,
-            RefreshToken = refreshToken,
-            DeviceId = deviceId
-        };
+            throw new InvalidOperationException("Sony returned an invalid device list. No credentials were stored.");
+        }
+    }
+
+    private static async Task<string> SelectDeviceAsync(
+        IReadOnlyList<SonyDeviceInfo> devices,
+        SonyDeviceSelector? selector,
+        CancellationToken cancellationToken)
+    {
+        var preferred = devices
+            .Where(device => device.DeviceType.Equals("Speaker", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var candidates = preferred.Length > 0
+            ? preferred
+            : devices.Where(device => device.DeviceType.Equals("TV", StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (candidates.Length == 0) candidates = devices.ToArray();
+        if (candidates.Length == 0)
+            throw new InvalidOperationException("No Sony soundbar, speaker, or TV was found on this account.");
+        if (candidates.Length == 1) return candidates[0].DeviceId;
+        if (selector == null)
+            throw new InvalidOperationException("Multiple Sony devices were found; select a device to continue.");
+
+        var selection = await selector(candidates, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(selection) || candidates.All(device => device.DeviceId != selection))
+            throw new OperationCanceledException("Sony device selection was cancelled.", cancellationToken);
+        return selection;
+    }
+
+    private static async Task<SonyCredentials> FetchSessionKeysAsync(
+        HttpClient client,
+        string accessToken,
+        string deviceId,
+        CancellationToken cancellationToken)
+    {
+        using var request = CreateIotRequest(
+            HttpMethod.Post,
+            $"{IotBaseUrl}/devices/{Uri.EscapeDataString(deviceId)}/session_keys",
+            accessToken);
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+            throw CreateHttpFailure("Sony session-key request", response);
+
+        var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            var sessionId = GetString(root, "session_id") ?? GetString(root, "key_id");
+            var hmacKey = GetString(root, "hmac_key") ?? GetString(root, "session_key");
+            var clientId = GetString(root, "client_id") ?? ClientId;
+            if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(hmacKey))
+                throw new JsonException();
+
+            return new SonyCredentials
+            {
+                ClientId = clientId,
+                SessionId = sessionId,
+                HmacKey = hmacKey,
+                DeviceId = deviceId
+            };
+        }
+        catch (JsonException)
+        {
+            throw new InvalidOperationException("Sony returned an invalid session-key response. No credentials were stored.");
+        }
+    }
+
+    private static HttpRequestMessage CreateIotRequest(HttpMethod method, string uri, string accessToken)
+    {
+        var request = new HttpRequestMessage(method, uri);
+        request.Headers.Add("User-Agent", IotUserAgent);
+        request.Headers.Add("x-api-key", ApiKey);
+        request.Headers.Add("Authorization", $"Bearer {accessToken}");
+        return request;
+    }
+
+    private static InvalidOperationException CreateHttpFailure(string operation, HttpResponseMessage response)
+    {
+        var retry = (int)response.StatusCode is 408 or 429 or >= 500;
+        var guidance = retry ? "Try again in a moment." : "Start sign-in again and verify the selected Sony account.";
+        return new InvalidOperationException($"{operation} failed (HTTP {(int)response.StatusCode}). {guidance}");
+    }
+
+    private static string? GetString(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static bool FixedTimeEquals(string left, string right)
+    {
+        var leftBytes = Encoding.UTF8.GetBytes(left);
+        var rightBytes = Encoding.UTF8.GetBytes(right);
+        return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
     }
 }
