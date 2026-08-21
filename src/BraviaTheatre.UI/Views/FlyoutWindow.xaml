@@ -182,8 +182,8 @@
         </Style>
     </Window.Resources>
 
-    <!-- Main Container with Windows 11 Rounded Drop Shadow Frame & Acrylic Blur -->
-    <Border x:Name="RootBorder" CornerRadius="12" Background="#E61E1E1E" BorderBrush="#383838" BorderThickness="1" Margin="10">
+    <!-- Main Container with Windows 11 Rounded Drop Shadow Frame -->
+    <Border x:Name="RootBorder" CornerRadius="12" Background="#1E1E1E" BorderBrush="#383838" BorderThickness="1" Margin="10">
         <Border.RenderTransform>
             <TranslateTransform x:Name="FlyoutTransform" Y="0"/>
         </Border.RenderTransform>
