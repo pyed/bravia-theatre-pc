@@ -1,4 +1,4 @@
-# BRAVIA Theatre PC (v2.1.0)
+# BRAVIA Theatre PC (v2.1.4)
 
 A high-performance, native Windows 11 system tray controller and Fluent Quick Settings flyout for modern Sony Home Audio systems, including the BRAVIA Theatre Bar 9 (HT-A9000), BRAVIA Theatre Bar 8 (HT-A8000), BRAVIA Theatre Quad (HT-A9M2), and compatible AV receivers.
 
