@@ -62,7 +62,7 @@
             <DockPanel Grid.Row="0" Margin="0,0,0,16">
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock Text="Settings" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="16"/>
-                    <TextBlock x:Name="TxtAppVersion" Text="BRAVIA Theatre PC v2.1.0" Foreground="#888888" FontSize="11" Margin="0,2,0,0"/>
+                    <TextBlock x:Name="TxtAppVersion" Text="BRAVIA Theatre PC" Foreground="#888888" FontSize="11" Margin="0,2,0,0"/>
                 </StackPanel>
                 <Button x:Name="BtnCloseHeader" Content="✕" Width="28" Height="28" HorizontalAlignment="Right" Background="Transparent" Foreground="#A0A0A0" BorderThickness="0" Cursor="Hand" Click="BtnCancel_Click">
                     <Button.Style>

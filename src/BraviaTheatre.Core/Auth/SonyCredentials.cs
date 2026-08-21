@@ -1,6 +1,3 @@
-using System;
-using System.IO;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace BraviaTheatre.Core.Auth;
@@ -52,22 +49,4 @@ public sealed class SonyCredentials
         !string.IsNullOrWhiteSpace(ClientId) &&
         !string.IsNullOrWhiteSpace(SessionId) &&
         !string.IsNullOrWhiteSpace(HmacKey);
-
-    public static SonyCredentials? LoadFromFile(string path)
-    {
-        if (!File.Exists(path))
-            return null;
-
-        try
-        {
-            var json = File.ReadAllText(path);
-            var creds = JsonSerializer.Deserialize<SonyCredentials>(json);
-            return creds?.IsValid == true ? creds : null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
 }

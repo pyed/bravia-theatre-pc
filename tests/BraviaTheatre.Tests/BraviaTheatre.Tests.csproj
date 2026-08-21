@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\BraviaTheatre.Core\BraviaTheatre.Core.csproj" />
+    <ProjectReference Include="..\..\src\BraviaTheatre.UI\BraviaTheatre.UI.csproj" />
   </ItemGroup>
 
 </Project>

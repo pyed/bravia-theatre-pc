@@ -24,8 +24,9 @@ public partial class SettingsWindow : Window
         _onReAuth = onReAuth;
 
         var ver = typeof(App).Assembly.GetName().Version;
-        string verStr = ver != null ? $"{ver.Major}.{ver.Minor}.{ver.Build}" : "2.1.0";
-        TxtAppVersion.Text = $"BRAVIA Theatre PC v{verStr}";
+        TxtAppVersion.Text = ver == null
+            ? "BRAVIA Theatre PC"
+            : $"BRAVIA Theatre PC v{ver.Major}.{ver.Minor}.{ver.Build}";
 
         ChkStartWithWindows.IsChecked = AutoStartService.IsAutoStartEnabled();
         ChkShowRearSpeaker.IsChecked = _settings.ShowRearSpeaker;
@@ -131,7 +132,6 @@ public partial class SettingsWindow : Window
         var updated = new AppSettings
         {
             StartWithWindows = ChkStartWithWindows.IsChecked ?? false,
-            AlwaysShowOnTaskbar = false,
             ShowRearSpeaker = ChkShowRearSpeaker.IsChecked ?? false,
             EnableGlobalHotkeys = ChkEnableGlobalHotkeys.IsChecked ?? true,
             HotkeyVolumeUp = TxtHotkeyVolUp.Text.Trim(),

@@ -50,9 +50,6 @@ public partial class App : Application
         return dir;
     }
 
-    private static string GetLegacyRoamingAppDataDir() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BraviaTheatrePC");
-
     public enum AppLogLevel
     {
         Critical = 0,
@@ -184,13 +181,8 @@ public partial class App : Application
         if (!string.IsNullOrWhiteSpace(settingsWarning))
             MessageBox.Show(settingsWarning, "Settings Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
 
-        var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppDomain.CurrentDomain.BaseDirectory;
         _credentialStore = new SonyCredentialStore(Path.Combine(GetAppDataDir(), "credentials.dat"));
-        var credentialResult = _credentialStore.LoadOrMigrate(new[]
-        {
-            Path.Combine(exeDir, "session_keys.json"),
-            Path.Combine(GetLegacyRoamingAppDataDir(), "session_keys.json")
-        });
+        var credentialResult = _credentialStore.Load();
         if (!string.IsNullOrWhiteSpace(credentialResult.Message))
             MessageBox.Show(credentialResult.Message, "Credential Storage", MessageBoxButton.OK, MessageBoxImage.Warning);
 

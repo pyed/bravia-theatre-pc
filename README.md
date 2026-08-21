@@ -89,7 +89,7 @@ The application validates the OAuth state before exchanging the authorization co
 %LOCALAPPDATA%\BraviaTheatrePC\credentials.dat
 ```
 
-The file is encrypted for the current Windows user with DPAPI. Legacy plaintext `session_keys.json` files are migrated atomically and removed after protected storage succeeds. Do not copy credential files, callback URLs, browser network captures, or verbose logs into issues, tests, or commits.
+The file is encrypted for the current Windows user with DPAPI. If protected credentials are not present, the application starts Sony account setup and creates them after successful sign-in. Do not copy credential files, callback URLs, browser network captures, or verbose logs into issues, tests, or commits.
 
 Use **Sony Account Setup** from the tray menu or **Re-authenticate** in Settings to select another account/device or replace local credentials. The existing engine is stopped before the replacement connection starts.
 
@@ -103,7 +103,7 @@ Settings are stored atomically under `%LOCALAPPDATA%\BraviaTheatrePC\settings.js
 - Automatic discovery or a static host/port override
 - Critical, Info, or Verbose logging
 
-Older executable-adjacent `settings.json` and `config.json` files are accepted as migration inputs; new installations should use the Settings window. Logs are written under `%LOCALAPPDATA%\BraviaTheatrePC` and rotate at approximately 2 MB.
+Only this current settings location is read. Logs are written under `%LOCALAPPDATA%\BraviaTheatrePC` and rotate at approximately 2 MB.
 
 ## Local-network security model
 

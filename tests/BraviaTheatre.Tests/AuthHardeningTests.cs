@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using BraviaTheatre.Core.Auth;
+using BraviaTheatre.UI.Services;
 
 namespace BraviaTheatre.Tests;
 
@@ -110,6 +111,94 @@ public sealed class AuthHardeningTests
         Assert.False(new SonyCredentials { HmacKey = "hmac" }.IsValid);
         Assert.False(new SonyCredentials { SessionId = "session" }.IsValid);
         Assert.True(new SonyCredentials { SessionId = "session", HmacKey = "hmac" }.IsValid);
+    }
+
+    [Fact]
+    public void CredentialStore_WhenProtectedFileIsMissing_ReturnsMissing()
+    {
+        var tempDir = CreateTempDirectoryPath();
+        var credentialPath = Path.Combine(tempDir, "credentials.dat");
+
+        try
+        {
+            var result = new SonyCredentialStore(credentialPath).Load();
+
+            Assert.Equal(CredentialLoadStatus.Missing, result.Status);
+            Assert.Null(result.Credentials);
+            Assert.False(File.Exists(credentialPath));
+        }
+        finally
+        {
+            DeleteTempDirectory(tempDir);
+        }
+    }
+
+    [Fact]
+    public void CredentialStore_SaveThenLoad_RoundTripsProtectedLocalCredentialsOnly()
+    {
+        var tempDir = CreateTempDirectoryPath();
+        var credentialPath = Path.Combine(tempDir, "credentials.dat");
+        var store = new SonyCredentialStore(credentialPath);
+        var credentials = new SonyCredentials
+        {
+            ClientId = "test-client",
+            SessionId = "test-sid",
+            HmacKey = "test-hmac",
+            DeviceId = "test-device",
+            AccessToken = "ephemeral",
+            RefreshToken = "ephemeral"
+        };
+
+        try
+        {
+            Assert.True(store.TrySave(credentials, out var saveError), saveError);
+
+            var result = store.Load();
+
+            Assert.Equal(CredentialLoadStatus.Loaded, result.Status);
+            Assert.NotNull(result.Credentials);
+            Assert.Equal("test-client", result.Credentials.ClientId);
+            Assert.Equal("test-sid", result.Credentials.SessionId);
+            Assert.Equal("test-hmac", result.Credentials.HmacKey);
+            Assert.Equal("test-device", result.Credentials.DeviceId);
+            Assert.Null(result.Credentials.AccessToken);
+            Assert.Null(result.Credentials.RefreshToken);
+        }
+        finally
+        {
+            DeleteTempDirectory(tempDir);
+        }
+    }
+
+    [Fact]
+    public void CredentialStore_WithUnsupportedProtectedFile_ReturnsError()
+    {
+        var tempDir = CreateTempDirectoryPath();
+        var credentialPath = Path.Combine(tempDir, "credentials.dat");
+
+        try
+        {
+            Directory.CreateDirectory(tempDir);
+            File.WriteAllText(credentialPath, "not-a-protected-credential-payload");
+
+            var result = new SonyCredentialStore(credentialPath).Load();
+
+            Assert.Equal(CredentialLoadStatus.Error, result.Status);
+            Assert.Null(result.Credentials);
+            Assert.NotNull(result.Message);
+        }
+        finally
+        {
+            DeleteTempDirectory(tempDir);
+        }
+    }
+
+    private static string CreateTempDirectoryPath() =>
+        Path.Combine(Path.GetTempPath(), "BraviaTheatre.Tests", Guid.NewGuid().ToString("N"));
+
+    private static void DeleteTempDirectory(string path)
+    {
+        if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
     }
 
     private static HttpResponseMessage Json(HttpStatusCode status, string json) => new(status)

@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -13,7 +11,6 @@ public enum CredentialLoadStatus
 {
     Missing,
     Loaded,
-    Migrated,
     Invalid,
     Error
 }
@@ -21,8 +18,7 @@ public enum CredentialLoadStatus
 public sealed record CredentialLoadResult(
     CredentialLoadStatus Status,
     SonyCredentials? Credentials = null,
-    string? Message = null,
-    string? MigratedFrom = null);
+    string? Message = null);
 
 /// <summary>
 /// Stores the local-control credentials encrypted for the current Windows user.
@@ -40,63 +36,28 @@ public sealed class SonyCredentialStore
 
     public string ProtectedFilePath { get; }
 
-    public CredentialLoadResult LoadOrMigrate(IEnumerable<string> legacyPaths)
+    public CredentialLoadResult Load()
     {
-        if (File.Exists(ProtectedFilePath))
+        if (!File.Exists(ProtectedFilePath))
+            return new CredentialLoadResult(CredentialLoadStatus.Missing);
+
+        try
         {
-            try
-            {
-                var credentials = ReadProtected();
-                return credentials.IsValid
-                    ? new CredentialLoadResult(CredentialLoadStatus.Loaded, credentials)
-                    : new CredentialLoadResult(CredentialLoadStatus.Invalid, Message: "The protected credential file is incomplete.");
-            }
-            catch (CryptographicException)
-            {
-                return new CredentialLoadResult(
-                    CredentialLoadStatus.Invalid,
-                    Message: "The protected credentials cannot be decrypted by this Windows account.");
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or FormatException)
-            {
-                return new CredentialLoadResult(CredentialLoadStatus.Error, Message: $"Could not load protected credentials: {ex.Message}");
-            }
+            var credentials = ReadProtected();
+            return credentials.IsValid
+                ? new CredentialLoadResult(CredentialLoadStatus.Loaded, credentials)
+                : new CredentialLoadResult(CredentialLoadStatus.Invalid, Message: "The protected credential file is incomplete.");
         }
-
-        foreach (var candidate in legacyPaths
-                     .Where(path => !string.IsNullOrWhiteSpace(path))
-                     .Select(Path.GetFullPath)
-                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        catch (CryptographicException)
         {
-            if (!File.Exists(candidate)) continue;
-
-            var credentials = SonyCredentials.LoadFromFile(candidate);
-            if (credentials == null)
-            {
-                return new CredentialLoadResult(
-                    CredentialLoadStatus.Invalid,
-                    Message: $"The legacy credential file is incomplete or malformed: {candidate}");
-            }
-
-            if (!TrySave(credentials, out var saveError))
-            {
-                return new CredentialLoadResult(CredentialLoadStatus.Error, Message: saveError);
-            }
-
-            string? warning = null;
-            try
-            {
-                File.Delete(candidate);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                warning = $"Credentials were protected, but the plaintext legacy file could not be removed: {candidate}. {ex.Message}";
-            }
-
-            return new CredentialLoadResult(CredentialLoadStatus.Migrated, credentials, warning, candidate);
+            return new CredentialLoadResult(
+                CredentialLoadStatus.Invalid,
+                Message: "The protected credentials cannot be decrypted by this Windows account.");
         }
-
-        return new CredentialLoadResult(CredentialLoadStatus.Missing);
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or FormatException)
+        {
+            return new CredentialLoadResult(CredentialLoadStatus.Error, Message: $"Could not load protected credentials: {ex.Message}");
+        }
     }
 
     public bool TrySave(SonyCredentials credentials, out string? error)

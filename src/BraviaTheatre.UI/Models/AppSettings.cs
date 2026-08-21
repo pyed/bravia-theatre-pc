@@ -1,18 +1,12 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace BraviaTheatre.UI.Models;
 
 public sealed class AppSettings
 {
     public bool StartWithWindows { get; set; }
-
-    // Retained only so older settings files deserialize cleanly. Windows owns tray-icon promotion.
-    public bool AlwaysShowOnTaskbar { get; set; }
-
     public bool ShowRearSpeaker { get; set; }
     public bool EnableGlobalHotkeys { get; set; } = true;
 
@@ -43,46 +37,7 @@ public sealed class AppSettings
             return new AppSettings();
         }
 
-        var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
-        var roamingDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "BraviaTheatrePC");
-        var legacyPaths = new[]
-        {
-            Path.Combine(exeDir, "settings.json"),
-            Path.Combine(roamingDir, "settings.json")
-        }
-        .Select(Path.GetFullPath)
-        .Where(path => !path.Equals(SettingsFilePath, StringComparison.OrdinalIgnoreCase))
-        .Distinct(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var path in legacyPaths)
-        {
-            if (!File.Exists(path)) continue;
-            if (!TryRead(path, out var migrated, out var readError))
-            {
-                warning = readError;
-                return new AppSettings();
-            }
-
-            ApplyLegacyConfigIfPresent(migrated!, exeDir);
-            if (!migrated!.TrySave(out var saveError))
-            {
-                warning = saveError;
-                return migrated;
-            }
-
-            try { File.Delete(path); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                warning = $"Settings were migrated, but the old file could not be removed: {ex.Message}";
-            }
-            return migrated;
-        }
-
-        var defaults = new AppSettings();
-        ApplyLegacyConfigIfPresent(defaults, exeDir);
-        return defaults;
+        return new AppSettings();
     }
 
     public bool TrySave(out string? error)
@@ -143,33 +98,5 @@ public sealed class AppSettings
             error = $"Could not load settings from {path}: {ex.Message}";
             return false;
         }
-    }
-
-    private static void ApplyLegacyConfigIfPresent(AppSettings settings, string exeDir)
-    {
-        var path = Path.Combine(exeDir, "config.json");
-        if (!File.Exists(path)) return;
-        try
-        {
-            var config = JsonSerializer.Deserialize<LegacyConfig>(File.ReadAllText(path));
-            if (config == null) return;
-            if (string.IsNullOrWhiteSpace(settings.StaticHost) && !string.IsNullOrWhiteSpace(config.Host))
-                settings.StaticHost = config.Host.Trim();
-            if (config.Port is >= 1 and <= 65535)
-                settings.StaticPort = config.Port;
-        }
-        catch
-        {
-            // The settings UI remains available to correct an invalid legacy config.
-        }
-    }
-
-    private sealed class LegacyConfig
-    {
-        [JsonPropertyName("host")]
-        public string? Host { get; set; }
-
-        [JsonPropertyName("port")]
-        public int Port { get; set; }
     }
 }
