@@ -6,15 +6,19 @@ namespace BraviaTheatre.Core.Wire;
 
 public static class NotifyParser
 {
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
     public static (string? path, object? value) ParseNotifyMessage(byte[] raw)
     {
         var fields = new Dictionary<int, DecodedField>();
         int pos = 0;
         while (pos < raw.Length)
         {
-            var (field, nextPos) = ProtobufWireCodec.DecodeField(raw, pos);
-            if (field == null)
+            if (!ProtobufWireCodec.TryDecodeField(raw, pos, out var field, out var nextPos)
+                || field == null)
+            {
                 break;
+            }
             fields[field.FieldNumber] = field;
             pos = nextPos;
         }
@@ -34,22 +38,33 @@ public static class NotifyParser
 
     public static (string? path, object? value) DecodeNotifyDelta(byte[] payload)
     {
-        int offset = 0;
-        var (outer, off1) = ProtobufWireCodec.DecodeField(payload, offset);
-        if (outer == null || outer.FieldNumber != 1 || outer.BytesValue == null)
+        if (!ProtobufWireCodec.TryDecodeField(payload, 0, out var outer, out _)
+            || outer == null
+            || outer.FieldNumber != 1
+            || outer.WireType != 2
+            || outer.BytesValue == null)
+        {
             return (null, null);
+        }
 
-        var (inner, _) = ProtobufWireCodec.DecodeField(outer.BytesValue, 0);
-        if (inner == null || inner.FieldNumber != 1 || inner.BytesValue == null)
+        if (!ProtobufWireCodec.TryDecodeField(outer.BytesValue, 0, out var inner, out _)
+            || inner == null
+            || inner.FieldNumber != 1
+            || inner.WireType != 2
+            || inner.BytesValue == null)
+        {
             return (null, null);
+        }
 
         var fields = new Dictionary<int, DecodedField>();
         int pos = 0;
         while (pos < inner.BytesValue.Length)
         {
-            var (field, nextPos) = ProtobufWireCodec.DecodeField(inner.BytesValue, pos);
-            if (field == null)
+            if (!ProtobufWireCodec.TryDecodeField(inner.BytesValue, pos, out var field, out var nextPos)
+                || field == null)
+            {
                 break;
+            }
             fields[field.FieldNumber] = field;
             pos = nextPos;
         }
@@ -57,15 +72,20 @@ public static class NotifyParser
         string? path = null;
         if (fields.TryGetValue(1, out var f1) && f1.BytesValue != null)
         {
-            path = Encoding.UTF8.GetString(f1.BytesValue);
+            path = DecodeUtf8(f1.BytesValue);
         }
 
         object? value = ExtractValue(fields);
 
-        // Sound field reports as int on wire, map to bool
+        // Some firmware uses the short wire path and reports its value as an int.
         if (path == "sound_field" && value is int intVal)
         {
+            path = "sound_setting.sound_field";
             value = intVal != 0;
+        }
+        else if (path == "sound_field")
+        {
+            path = "sound_setting.sound_field";
         }
 
         return (path, value);
@@ -76,7 +96,7 @@ public static class NotifyParser
         if (fields.TryGetValue(2, out var f2))
         {
             if (f2.WireType == 0)
-                return (int)f2.VarintValue;
+                return DecodeSignedInteger(f2.VarintValue);
             if (f2.BytesValue != null)
             {
                 if (f2.BytesValue.Length == 0)
@@ -86,16 +106,9 @@ public static class NotifyParser
                 if (nestedInt.HasValue)
                     return nestedInt.Value;
 
-                try
-                {
-                    var text = Encoding.UTF8.GetString(f2.BytesValue);
-                    if (!string.IsNullOrEmpty(text))
-                        return text;
-                }
-                catch
-                {
-                    // Fallback
-                }
+                var text = DecodeUtf8(f2.BytesValue);
+                if (IsPrintable(text))
+                    return text;
                 return Convert.ToHexString(f2.BytesValue);
             }
         }
@@ -127,28 +140,58 @@ public static class NotifyParser
 
     private static int? NestedVarint(byte[] payload)
     {
-        var (field, _) = ProtobufWireCodec.DecodeField(payload, 0);
-        if (field != null && field.FieldNumber == 1 && field.WireType == 0)
+        if (ProtobufWireCodec.TryDecodeField(payload, 0, out var field, out _)
+            && field != null
+            && field.FieldNumber == 1
+            && field.WireType == 0)
         {
-            return (int)field.VarintValue;
+            var decoded = DecodeSignedInteger(field.VarintValue);
+            return decoded is int value ? value : null;
         }
         return null;
     }
 
     private static string? NestedString(byte[] payload)
     {
-        var (field, _) = ProtobufWireCodec.DecodeField(payload, 0);
-        if (field != null && field.FieldNumber == 1 && field.WireType == 2 && field.BytesValue != null)
+        if (ProtobufWireCodec.TryDecodeField(payload, 0, out var field, out _)
+            && field != null
+            && field.FieldNumber == 1
+            && field.WireType == 2
+            && field.BytesValue != null)
         {
-            try
-            {
-                return Encoding.UTF8.GetString(field.BytesValue);
-            }
-            catch
-            {
-                return null;
-            }
+            return DecodeUtf8(field.BytesValue);
         }
         return null;
+    }
+
+    private static object DecodeSignedInteger(ulong value)
+    {
+        var signed = unchecked((long)value);
+        if (signed is >= int.MinValue and <= int.MaxValue)
+            return (int)signed;
+        return signed;
+    }
+
+    private static string? DecodeUtf8(byte[] bytes)
+    {
+        try
+        {
+            return StrictUtf8.GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsPrintable(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return false;
+        foreach (var c in value)
+        {
+            if (!char.IsControl(c) || c is '\r' or '\n' or '\t') continue;
+            return false;
+        }
+        return true;
     }
 }

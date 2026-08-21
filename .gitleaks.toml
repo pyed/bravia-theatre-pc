@@ -1,0 +1,31 @@
+title = "BRAVIA Theatre PC secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "sony-credential-json"
+description = "Sony OAuth or local-control credential serialized to JSON"
+regex = '''(?i)"(?:hmac_key|session_key|access_token|refresh_token)"\s*:\s*"[^"\s]{16,}"'''
+keywords = ["hmac_key", "session_key", "access_token", "refresh_token"]
+
+[[rules]]
+id = "sony-hmac-key-literal"
+description = "Possible 32-byte Sony HMAC key embedded in source"
+regex = '''(?i)(?:hmac|session)[a-z0-9_]*(?:key)?\s*=\s*"[0-9a-f]{64}"'''
+keywords = ["hmac", "session"]
+
+[[rules]]
+id = "sony-session-id-literal"
+description = "Possible Sony session identifier embedded in source or JSON"
+regex = '''(?i)"?(?:sessionid|session_id|keyid|key_id)"?\s*(?:=|:)\s*"[0-9a-z-]{12,}"'''
+keywords = ["session", "key"]
+
+[allowlist]
+description = "Scanner configuration and Sony's public application identifier are not user credentials"
+paths = ['''(^|/)\.gitleaks\.toml$''']
+regexTarget = "match"
+regexes = [
+  '''4wTuTmXg3p41yIqIa1TdfMtyejb6s2Mz83Dxv''',
+  '''11111111-2222-3333-4444-555555555555'''
+]

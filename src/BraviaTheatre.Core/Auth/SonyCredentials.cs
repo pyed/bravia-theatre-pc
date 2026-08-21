@@ -37,13 +37,21 @@ public sealed class SonyCredentials
     }
 
     [JsonPropertyName("access_token")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Always)]
     public string? AccessToken { get; set; }
 
     [JsonPropertyName("refresh_token")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Always)]
     public string? RefreshToken { get; set; }
 
     [JsonPropertyName("device_id")]
     public string? DeviceId { get; set; }
+
+    [JsonIgnore]
+    public bool IsValid =>
+        !string.IsNullOrWhiteSpace(ClientId) &&
+        !string.IsNullOrWhiteSpace(SessionId) &&
+        !string.IsNullOrWhiteSpace(HmacKey);
 
     public static SonyCredentials? LoadFromFile(string path)
     {
@@ -54,9 +62,7 @@ public sealed class SonyCredentials
         {
             var json = File.ReadAllText(path);
             var creds = JsonSerializer.Deserialize<SonyCredentials>(json);
-            if (creds != null && (!string.IsNullOrEmpty(creds.SessionId)) && (!string.IsNullOrEmpty(creds.HmacKey)))
-                return creds;
-            return creds;
+            return creds?.IsValid == true ? creds : null;
         }
         catch
         {
@@ -64,21 +70,4 @@ public sealed class SonyCredentials
         }
     }
 
-    public void SaveToFile(string path)
-    {
-        var dir = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-        {
-            try { Directory.CreateDirectory(dir); } catch { }
-        }
-
-        // Ensure canonical fields are set
-        SessionIdRaw ??= SessionId;
-        KeyIdRaw ??= SessionId;
-        HmacKeyRaw ??= HmacKey;
-        SessionKeyRaw ??= HmacKey;
-
-        var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(path, json);
-    }
 }

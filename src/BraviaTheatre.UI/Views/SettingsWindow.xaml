@@ -95,8 +95,26 @@
                     <Border Background="#262626" BorderBrush="#333333" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,16">
                         <StackPanel>
                             <CheckBox x:Name="ChkStartWithWindows" Content="Start automatically with Windows" Foreground="#D0D0D0" FontSize="12.5" Margin="0,4"/>
-                            <CheckBox x:Name="ChkAlwaysShowOnTaskbar" Content="Always show icon on taskbar (prevent overflow hide)" Foreground="#D0D0D0" FontSize="12.5" Margin="0,8,0,4"/>
                             <CheckBox x:Name="ChkShowRearSpeaker" Content="Show Rear Speaker Level control (for SA-RS3S / SA-RS5)" Foreground="#D0D0D0" FontSize="12.5" Margin="0,8,0,4"/>
+
+                            <Separator Margin="0,10,0,8"/>
+                            <TextBlock Text="Connection override" Foreground="#FFFFFF" FontWeight="Medium" FontSize="12.5"/>
+                            <TextBlock Text="Leave host empty for automatic discovery. Changes reconnect the controller."
+                                       Foreground="#A8A8A8" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,8"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="90"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="TxtStaticHost" Grid.Column="0" Height="28" Margin="0,0,8,0"
+                                         Background="#1C1C1C" Foreground="#FFFFFF" BorderBrush="#444444"
+                                         Padding="6,2" VerticalContentAlignment="Center"
+                                         AutomationProperties.Name="Static soundbar host"/>
+                                <TextBox x:Name="TxtStaticPort" Grid.Column="1" Height="28"
+                                         Background="#1C1C1C" Foreground="#FFFFFF" BorderBrush="#444444"
+                                         Padding="6,2" VerticalContentAlignment="Center"
+                                         AutomationProperties.Name="Soundbar port"/>
+                            </Grid>
                         </StackPanel>
                     </Border>
 
@@ -164,7 +182,7 @@
                             <DockPanel Margin="0,4,0,0">
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="Log File Location" Foreground="#FFFFFF" FontSize="12.5" FontWeight="Medium"/>
-                                    <TextBlock x:Name="TxtLogPath" Text="%APPDATA%\BraviaTheatrePC\bravia_csharp.log" Foreground="#888888" FontSize="10.5" Margin="0,2,0,0" FontFamily="Consolas, Segoe UI"/>
+                                    <TextBlock x:Name="TxtLogPath" Text="%LOCALAPPDATA%\BraviaTheatrePC\bravia_csharp.log" Foreground="#888888" FontSize="10.5" Margin="0,2,0,0" FontFamily="Consolas, Segoe UI"/>
                                 </StackPanel>
                                 <Button Content="Open Folder" HorizontalAlignment="Right" Padding="10,4" Background="#333333" Foreground="#FFFFFF" BorderBrush="#444444" BorderThickness="1" Cursor="Hand" Click="BtnOpenLogFolder_Click"/>
                             </DockPanel>
@@ -199,8 +217,8 @@
 
             <!-- Bottom Action Buttons -->
             <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="Cancel" Width="80" Height="32" Background="#2C2C2C" Foreground="#D0D0D0" BorderBrush="#3C3C3C" BorderThickness="1" Margin="0,0,8,0" Cursor="Hand" Click="BtnCancel_Click"/>
-                <Button Content="Save" Width="80" Height="32" Background="#4CC2FF" Foreground="#000000" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Click="BtnSave_Click"/>
+                <Button Content="Cancel" IsCancel="True" Width="80" Height="32" Background="#2C2C2C" Foreground="#D0D0D0" BorderBrush="#3C3C3C" BorderThickness="1" Margin="0,0,8,0" Cursor="Hand" Click="BtnCancel_Click"/>
+                <Button Content="Save" IsDefault="True" Width="80" Height="32" Background="#4CC2FF" Foreground="#000000" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Click="BtnSave_Click"/>
             </StackPanel>
         </Grid>
     </Border>

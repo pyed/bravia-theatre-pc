@@ -1,0 +1,43 @@
+<Window x:Class="BraviaTheatre.UI.Views.DeviceSelectionDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Select Sony Device - BRAVIA Theatre PC"
+        Width="420" Height="360"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip"
+        MinWidth="360" MinHeight="280"
+        Background="#1E1E1E"
+        Foreground="White">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Margin="0,0,0,12">
+            <TextBlock Text="Select a Sony device" FontSize="18" FontWeight="SemiBold"/>
+            <TextBlock Text="More than one compatible device is linked to this account."
+                       Foreground="#B8B8B8" Margin="0,4,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <ListBox x:Name="DeviceList" Grid.Row="1" Background="#262626" Foreground="White"
+                 BorderBrush="#454545" BorderThickness="1"
+                 AutomationProperties.Name="Sony devices"
+                 MouseDoubleClick="DeviceList_MouseDoubleClick">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Margin="8">
+                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding DeviceType}" Foreground="#B8B8B8" FontSize="12"/>
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+            <Button Content="Cancel" IsCancel="True" Width="84" Margin="0,0,8,0" Padding="8,5"/>
+            <Button Content="Continue" IsDefault="True" Width="96" Padding="8,5" Click="Continue_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

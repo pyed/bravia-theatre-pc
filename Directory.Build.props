@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <Version>2.1.4</Version>
+    <Product>BRAVIA Theatre PC</Product>
+    <Company>pyed</Company>
+    <Authors>pyed</Authors>
+    <Copyright>Copyright © 2026 pyed</Copyright>
+
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(CI)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+</Project>

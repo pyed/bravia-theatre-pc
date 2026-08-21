@@ -1,17 +1,21 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace BraviaTheatre.UI.Models;
 
 public sealed class AppSettings
 {
-    public bool StartWithWindows { get; set; } = false;
-    public bool AlwaysShowOnTaskbar { get; set; } = true;
-    public bool ShowRearSpeaker { get; set; } = false;
+    public bool StartWithWindows { get; set; }
+
+    // Retained only so older settings files deserialize cleanly. Windows owns tray-icon promotion.
+    public bool AlwaysShowOnTaskbar { get; set; }
+
+    public bool ShowRearSpeaker { get; set; }
     public bool EnableGlobalHotkeys { get; set; } = true;
 
-    // Configurable Global Hotkeys (Default: Ctrl + Alt + Key)
     public string HotkeyVolumeUp { get; set; } = "Ctrl + Alt + Up";
     public string HotkeyVolumeDown { get; set; } = "Ctrl + Alt + Down";
     public string HotkeyMute { get; set; } = "Ctrl + Shift + M";
@@ -21,47 +25,151 @@ public sealed class AppSettings
 
     public string? StaticHost { get; set; } = "";
     public int StaticPort { get; set; } = 55051;
-    public string LogLevel { get; set; } = "Critical"; // "Critical", "Info", "Verbose"
+    public string LogLevel { get; set; } = "Critical";
 
-    private static string GetSettingsFilePath()
+    public static string SettingsFilePath => Path.Combine(App.GetAppDataDir(), "settings.json");
+
+    public static AppSettings Load() => Load(out _);
+
+    public static AppSettings Load(out string? warning)
     {
-        var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppDomain.CurrentDomain.BaseDirectory;
-        var localPath = Path.Combine(exeDir, "settings.json");
-        if (File.Exists(localPath)) return localPath;
-
-        var appDataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BraviaTheatrePC");
-        if (!Directory.Exists(appDataDir))
+        warning = null;
+        if (File.Exists(SettingsFilePath))
         {
-            try { Directory.CreateDirectory(appDataDir); } catch { }
+            if (TryRead(SettingsFilePath, out var loaded, out var error))
+                return loaded!;
+
+            warning = error;
+            return new AppSettings();
         }
-        return Path.Combine(appDataDir, "settings.json");
+
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+        var roamingDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "BraviaTheatrePC");
+        var legacyPaths = new[]
+        {
+            Path.Combine(exeDir, "settings.json"),
+            Path.Combine(roamingDir, "settings.json")
+        }
+        .Select(Path.GetFullPath)
+        .Where(path => !path.Equals(SettingsFilePath, StringComparison.OrdinalIgnoreCase))
+        .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var path in legacyPaths)
+        {
+            if (!File.Exists(path)) continue;
+            if (!TryRead(path, out var migrated, out var readError))
+            {
+                warning = readError;
+                return new AppSettings();
+            }
+
+            ApplyLegacyConfigIfPresent(migrated!, exeDir);
+            if (!migrated!.TrySave(out var saveError))
+            {
+                warning = saveError;
+                return migrated;
+            }
+
+            try { File.Delete(path); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                warning = $"Settings were migrated, but the old file could not be removed: {ex.Message}";
+            }
+            return migrated;
+        }
+
+        var defaults = new AppSettings();
+        ApplyLegacyConfigIfPresent(defaults, exeDir);
+        return defaults;
     }
 
-    public static AppSettings Load()
+    public bool TrySave(out string? error)
     {
+        error = null;
+        StaticHost = StaticHost?.Trim() ?? "";
+        if (StaticPort is < 1 or > 65535)
+        {
+            error = "The connection port must be between 1 and 65535.";
+            return false;
+        }
+
+        string? tempPath = null;
         try
         {
-            var path = GetSettingsFilePath();
-            if (File.Exists(path))
+            var directory = Path.GetDirectoryName(SettingsFilePath)!;
+            Directory.CreateDirectory(directory);
+            var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+            tempPath = Path.Combine(directory, $".settings.{Guid.NewGuid():N}.tmp");
+            File.WriteAllText(tempPath, json);
+            File.Move(tempPath, SettingsFilePath, true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            error = $"Could not save settings: {ex.Message}";
+            return false;
+        }
+        finally
+        {
+            if (tempPath != null)
             {
-                var json = File.ReadAllText(path);
-                var loaded = JsonSerializer.Deserialize<AppSettings>(json);
-                if (loaded != null) return loaded;
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); }
+                catch { }
             }
         }
-        catch { }
-
-        return new AppSettings();
     }
 
-    public void Save()
+    public void Save() => TrySave(out _);
+
+    private static bool TryRead(string path, out AppSettings? settings, out string? error)
     {
+        settings = null;
+        error = null;
         try
         {
-            var path = GetSettingsFilePath();
-            var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(path, json);
+            var json = File.ReadAllText(path);
+            settings = JsonSerializer.Deserialize<AppSettings>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+            if (settings == null) throw new JsonException("The settings document is empty.");
+            settings.StaticPort = settings.StaticPort is >= 1 and <= 65535 ? settings.StaticPort : 55051;
+            return true;
         }
-        catch { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            error = $"Could not load settings from {path}: {ex.Message}";
+            return false;
+        }
+    }
+
+    private static void ApplyLegacyConfigIfPresent(AppSettings settings, string exeDir)
+    {
+        var path = Path.Combine(exeDir, "config.json");
+        if (!File.Exists(path)) return;
+        try
+        {
+            var config = JsonSerializer.Deserialize<LegacyConfig>(File.ReadAllText(path));
+            if (config == null) return;
+            if (string.IsNullOrWhiteSpace(settings.StaticHost) && !string.IsNullOrWhiteSpace(config.Host))
+                settings.StaticHost = config.Host.Trim();
+            if (config.Port is >= 1 and <= 65535)
+                settings.StaticPort = config.Port;
+        }
+        catch
+        {
+            // The settings UI remains available to correct an invalid legacy config.
+        }
+    }
+
+    private sealed class LegacyConfig
+    {
+        [JsonPropertyName("host")]
+        public string? Host { get; set; }
+
+        [JsonPropertyName("port")]
+        public int Port { get; set; }
     }
 }

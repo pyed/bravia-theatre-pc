@@ -1,215 +1,155 @@
-# BRAVIA Theatre PC (v2.1.4)
+# BRAVIA Theatre PC
 
-A high-performance, native Windows 11 system tray controller and Fluent Quick Settings flyout for modern Sony Home Audio systems, including the BRAVIA Theatre Bar 9 (HT-A9000), BRAVIA Theatre Bar 8 (HT-A8000), BRAVIA Theatre Quad (HT-A9M2), and compatible AV receivers.
+BRAVIA Theatre PC is a native Windows tray controller and compact WPF quick-controls flyout for compatible Sony BRAVIA Theatre audio systems. It shows the current audio format in the taskbar and provides volume, mute, input, bass, rear-level, sound-field, night-mode, voice-mode, and power controls.
 
-Rewritten entirely from the ground up in C# and .NET 9 with Windows Presentation Foundation (WPF), BRAVIA Theatre PC delivers real-time audio bitstream identification directly in the Windows taskbar, instantaneous zero-latency volume adjustments, bass level calibration, input switching, and quick toggles for 360 Spatial Sound Mapping (Sound Field), Night Mode, Voice Mode, and Power.
-
-All communication occurs locally over Sony's encrypted gRPC protocol (port 55051), providing instantaneous response times without routing telemetry or control commands through external cloud servers during active playback.
-
----
+Built with C# and .NET 10, the application communicates directly with the device on the local network after an initial Sony account sign-in is used to obtain local-control credentials.
 
 ## Screenshots
 
 <div align="center">
-  <img src="assets/screenshots/flyout_1.png" width="31%" alt="BRAVIA Theatre PC Live Flyout" />
-  <img src="assets/screenshots/flyout_2.png" width="31%" alt="BRAVIA Theatre PC Live Flyout with Rear Level Slider" />
-  <img src="assets/screenshots/flyout_3.png" width="31%" alt="BRAVIA Theatre PC Live Flyout Compact Mode" />
+  <img src="assets/screenshots/flyout_1.png" width="31%" alt="BRAVIA Theatre PC flyout" />
+  <img src="assets/screenshots/flyout_2.png" width="31%" alt="BRAVIA Theatre PC flyout with rear-level control" />
+  <img src="assets/screenshots/flyout_3.png" width="31%" alt="BRAVIA Theatre PC compact flyout" />
 </div>
-
-<p align="center">
-  <em>Live Windows 11 Fluent Quick Settings Flyout featuring dynamic audio bitstream detection, glowing power toggle, input source selection, compact action tiles, and native Windows sound slider.</em>
-</p>
-
----
 
 ## Features
 
-- **Dynamic Taskbar Codec Badges:** Real-time taskbar icon updates reflecting the active audio bitstream:
-  - **Dolby Atmos:** TrueHD, Digital Plus (E-AC-3), and MAT containers
-  - **Dolby Audio:** Dolby Digital Plus, Dolby TrueHD, and Dolby Digital (AC-3)
-  - **DTS:** DTS:X, DTS:X Master Audio, DTS-HD Master Audio, DTS-HD High Resolution, DTS 96/24, and DTS Express
-  - **IMAX Enhanced:** IMAX Enhanced DTS bitstreams
-  - **Linear PCM:** Multichannel and stereo uncompressed LPCM
-  - **Sony 360 Reality Audio & AAC**
-  - **Standby & Idle Indicators**
-- **Windows 11 Fluent Quick Settings Flyout:**
-  - **Header Controls:** Interactive input source switcher (`HDMI ▾`, `TV ▾`, `BLUETOOTH ▾`), glowing power symbol (`⏻`), and Settings gear (`⚙`).
-  - **Sony App-Aligned Quick Action Tiles:** Instant toggle buttons for **Night Mode**, **Sound Field** (360 Spatial Sound Mapping), and **Voice Mode**.
-  - **Native Windows 11 Sound Slider & Mute Icon:** Custom halo thumb, Fluent Blue fill (`#4CC2FF`), click-to-point track jumping, mouse-wheel scrolling, and Windows speaker/mute icon (`Speaker + X`).
-  - **3-Way Bass Level Selector:** Compact segmented pill control (`MIN` | `MID` | `MAX`) for instant subwoofer level calibration.
-  - **Optional Rear Speaker Level Slider:** Smooth `-10` to `+10` level slider for systems paired with SA-RS3S or SA-RS5 surround speakers.
-  - **Active Audio Hero Card:** Detailed bitstream format, audio channel layout (e.g., 7.1, 5.1.2, 2.0), and physical input source (eARC / HDMI).
-  - **Ergonomic Bottom-Anchored Layout:** Volume slider positioned closest to the taskbar for immediate reach.
-- **Configurable Global Keyboard Shortcuts:**
-  - `Ctrl + Alt + Up`: Volume Up (+2)
-  - `Ctrl + Alt + Down`: Volume Down (-2)
-  - `Ctrl + Shift + M`: Toggle Mute
-  - `Ctrl + Alt + S`: Toggle Sound Field
-  - `Ctrl + Alt + V`: Toggle Voice Mode
-  - `Ctrl + Alt + N`: Toggle Night Mode
-  - *(All shortcuts are interactively customizable in the Settings window)*
-- **Integrated Automatic Sony Sign-In (WebView2):**
-  - Embedded in-app authentication dialog automatically intercepts Sony's OAuth callback and exchanges session keys seamlessly with zero manual DevTools or copy-pasting.
-  - Built-in manual fallback mode for third-party social logins or non-WebView environments.
-- **Configurable Diagnostics & Logging:**
-  - In-Settings log level selector (`Critical`, `Info`, `Verbose`). Default is `Critical` (completely silent during normal daily operation).
-  - One-click button in Settings to open the local log folder (`%APPDATA%\BraviaTheatrePC\`).
-  - Automatic 2 MB log rotation to ensure zero disk bloat.
-- **Dedicated Fluent Settings Window:** Windows 11 Fluent dialog for startup configuration, taskbar icon persistence, optional rear speaker level slider, logging levels, and interactive global shortcut customization with live key recording.
-- **High-Performance Non-Blocking Architecture:**
-  - Background asynchronous command queuing with volume coalescing to prevent network bottlenecking during rapid slider movement.
-  - Pure Win32 `Shell_NotifyIconW` integration with automatic explorer recovery upon `TaskbarCreated` messages.
-- **Local Network Auto-Discovery:**
-  - Multi-interface mDNS discovery (`_sonysmarthome._tcp.local.`) coupled with parallel subnet TCP probing on port `55051`, finding devices in ~120ms.
+- Live codec and channel display, with badges for Dolby Atmos, Dolby Audio, DTS/DTS:X, IMAX Enhanced, LPCM/PCM, AAC, and Sony 360 Reality Audio.
+- A compact Windows quick-controls flyout for volume, mute, input, bass, optional rear-speaker level, sound field, night mode, voice mode, and power.
+- Configurable global shortcuts, registered atomically so a conflicting shortcut cannot leave a partial hotkey setup.
+- Embedded Sony OAuth sign-in with PKCE and callback-state verification, a manual browser fallback, and explicit device selection when an account contains multiple compatible devices.
+- Windows user-scoped credential protection using DPAPI. Sony cloud access and refresh tokens are not persisted.
+- Automatic local discovery using mDNS first, followed by a bounded subnet probe that fingerprints candidates before connecting.
+- Connection-scoped workers, health polling, command coalescing, stale-command rejection, and clean reconnect/teardown behavior.
+- Native Win32 tray integration with Explorer restart recovery, multi-monitor flyout placement, and single-instance activation.
+- Atomic settings storage, Windows startup integration, configurable logging, and optional static host/port override.
 
----
+Default shortcuts are:
 
-## Supported Devices
+| Action | Shortcut |
+| --- | --- |
+| Volume up | `Ctrl + Alt + Up` |
+| Volume down | `Ctrl + Alt + Down` |
+| Toggle mute | `Ctrl + Shift + M` |
+| Toggle sound field | `Ctrl + Alt + S` |
+| Toggle voice mode | `Ctrl + Alt + V` |
+| Toggle night mode | `Ctrl + Alt + N` |
 
-- Sony BRAVIA Theatre Bar 9 (HT-A9000)
-- Sony BRAVIA Theatre Bar 8 (HT-A8000)
-- Sony BRAVIA Theatre Quad (HT-A9M2)
-- Compatible Sony Home Audio systems and AV receivers utilizing the Sony BRAVIA Connect protocol
+All shortcuts can be changed or disabled in Settings.
 
----
+## Supported devices
 
-## Getting Started
+The protocol is intended for recent Sony systems managed by the Sony BRAVIA Connect app, including:
 
-### Prerequisites
+- BRAVIA Theatre Bar 9 (HT-A9000)
+- BRAVIA Theatre Bar 8 (HT-A8000)
+- BRAVIA Theatre Quad (HT-A9M2)
+- Other compatible Sony home-audio systems exposing the same local control service
 
-- Windows 10 (version 1903 or later) / Windows 11 (64-bit)
-- [.NET 9.0 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) (if building from source)
+Compatibility can vary by model and firmware. Reports with model and firmware details are welcome, but never attach credential files or unredacted diagnostic captures.
 
-### Installation & Execution
+## Install and run
 
-#### Option 1: Standalone Single-File Executable (Recommended)
+### Release executable
 
-1. Download **`BraviaTheatrePC.exe`** (~61 MB) from the latest [GitHub Releases](../../releases) page.
-2. Place the executable in any directory of your choice and run it (zero dependencies, no .NET installation required).
-3. On first launch, the **Sony Account Sign-In** wizard will open automatically to guide you through setup.
+Download the appropriate executable from [GitHub Releases](../../releases):
 
-#### Option 2: Ultra-Compact Lightweight Executable (5.2 MB)
+- `BraviaTheatrePC.exe` is self-contained and does not require a separately installed .NET runtime.
+- `BraviaTheatrePC-FrameworkDependent.exe` requires the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0).
 
-1. Download **`BraviaTheatrePC-FrameworkDependent.exe`** (5.2 MB) from [GitHub Releases](../../releases).
-2. Requires [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0) installed on your system.
+Run the executable and complete Sony sign-in when prompted.
 
-#### Option 3: Running from Source
+### Run from source
 
-1. Clone the repository:
-   ```bat
-   git clone https://github.com/pyed/bravia-theatre-pc.git
-   cd bravia-theatre-pc
-   ```
+Requirements:
 
-2. Run the application:
-   ```bat
-   dotnet run --project src/BraviaTheatre.UI/BraviaTheatre.UI.csproj
-   ```
+- Windows 10 or Windows 11, 64-bit
+- [.NET SDK 10.0.302](https://dotnet.microsoft.com/download/dotnet/10.0) or a compatible patch selected by `global.json`
+- Microsoft Edge WebView2 Runtime for the embedded sign-in experience
 
-#### Option 4: Building Standalone Executable Locally
+```powershell
+git clone https://github.com/pyed/bravia-theatre-pc.git
+cd bravia-theatre-pc
+dotnet run --project src/BraviaTheatre.UI/BraviaTheatre.UI.csproj
+```
 
-To produce the self-contained single-file executable locally:
+To create a self-contained single-file build:
 
-```bat
+```powershell
 dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o publish
 ```
 
----
+## Sony account setup and credential storage
 
-## First-Time Sony Account Setup
+On first launch, sign in with the Sony account linked to the device in the BRAVIA Connect app. The embedded flow normally captures the `ssh-app://signin` callback automatically. Manual mode opens the same Sony authorization page in the default browser and accepts the complete callback URL.
 
-Sony BRAVIA Theatre devices derive local gRPC encryption keys from Sony Cloud OAuth sessions. The application features an integrated setup wizard with **automatic sign-in** and a manual fallback.
+The application validates the OAuth state before exchanging the authorization code. It then requests device-local session credentials and stores only those local-control values in:
 
-### Automatic Sign-In (Recommended):
-
-1. Launch `BraviaTheatrePC.exe`.
-2. The **Sony Account Sign-In** window will appear with the official Sony login page.
-3. Log in with your Sony account (the same account linked to your soundbar in the Sony BRAVIA Connect mobile app).
-4. The application **automatically intercepts** the sign-in callback, exchanges cryptographic keys, and connects immediately to your soundbar — no Developer Tools or copy-pasting required.
-
-### Manual Sign-In (Fallback / Developer Tools):
-
-If your account uses a third-party social provider or you prefer manual setup:
-1. Click **Switch to Manual Mode (F12)** at the bottom of the sign-in window.
-2. Click **Open Sony Sign-In in Browser**.
-3. In your browser, press `F12` (or right-click -> Inspect) to open Developer Tools and enable **Preserve log** in the **Network** tab.
-4. Log into Sony and locate the redirect request starting with:
-   ```
-   ssh-app://signin?code=...
-   ```
-5. Copy and paste the redirect URL into the setup dialog and click **Complete & Connect**.
-
-> **Security Note:** `session_keys.json` contains encrypted session keys stored strictly on your local machine (`%APPDATA%\BraviaTheatrePC\`). It is excluded from version control via `.gitignore` and should never be shared publicly.
-
----
-
-## Controls & Usage
-
-- **Left-Click Tray Icon:** Opens the Windows 11 Fluent Quick Settings flyout panel.
-- **Mouse Wheel on Volume Card:** Adjusts soundbar master volume in 1-tick increments.
-- **Click Speaker Icon:** Toggles mute with Windows mute icon indicator.
-- **Right-Click Tray Icon:** Opens the context menu:
-  - **Header Status:** Live soundbar power, bitstream format, and volume level.
-  - **Settings:** Opens the Settings dialog.
-  - **Sony Account Setup:** Re-authenticate or switch Sony accounts.
-  - **Exit:** Shut down the application.
-
----
-
-## Configuration
-
-An optional `config.json` file can be placed alongside `BraviaTheatrePC.exe` to specify connection parameters:
-
-```json
-{
-  "host": "192.168.1.118",
-  "port": 55051
-}
+```text
+%LOCALAPPDATA%\BraviaTheatrePC\credentials.dat
 ```
 
-- `host`: Static IPv4 address of the soundbar (leave empty for automatic mDNS / subnet discovery).
-- `port`: The gRPC control port (default: `55051`).
+The file is encrypted for the current Windows user with DPAPI. Legacy plaintext `session_keys.json` files are migrated atomically and removed after protected storage succeeds. Do not copy credential files, callback URLs, browser network captures, or verbose logs into issues, tests, or commits.
 
----
+Use **Sony Account Setup** from the tray menu or **Re-authenticate** in Settings to select another account/device or replace local credentials. The existing engine is stopped before the replacement connection starts.
 
-## Architecture & Codebase Structure
+## Configuration and diagnostics
 
+Settings are stored atomically under `%LOCALAPPDATA%\BraviaTheatrePC\settings.json`. Use the Settings window to configure:
+
+- Windows startup
+- Optional rear-speaker controls
+- Global shortcuts
+- Automatic discovery or a static host/port override
+- Critical, Info, or Verbose logging
+
+Older executable-adjacent `settings.json` and `config.json` files are accepted as migration inputs; new installations should use the Settings window. Logs are written under `%LOCALAPPDATA%\BraviaTheatrePC` and rotate at approximately 2 MB.
+
+## Local-network security model
+
+Device control uses cleartext HTTP/2 gRPC on the local network (normally TCP port `55051`). Sony session credentials provide protocol authentication, but the transport is not TLS-encrypted. Run the application only on a trusted LAN, keep the soundbar and PC firmware current, and avoid exposing the control port across the internet or an untrusted network.
+
+See [SECURITY.md](SECURITY.md) for private vulnerability reporting, credential-containment guidance, and supported versions.
+
+## Development
+
+Restore, verify formatting, build, and test from the repository root:
+
+```powershell
+dotnet restore BraviaTheatrePC.sln
+dotnet format BraviaTheatrePC.sln --verify-no-changes --no-restore
+dotnet build BraviaTheatrePC.sln -c Release --no-restore -warnaserror
+dotnet test BraviaTheatrePC.sln -c Release --no-build --no-restore
 ```
+
+The tests cover bounded wire decoding, schema-aware state parsing, client session sequencing, discovery parsing and cancellation, OAuth validation, credential serialization, codec taxonomy, connection teardown, reconnect isolation, stale commands, and snapshot/delta ordering.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes. Test vectors must be synthetic; real session IDs, HMAC keys, OAuth tokens, device identifiers, and packet captures are prohibited.
+
+## Project structure
+
+```text
 bravia-theatre-pc/
 ├── src/
-│   ├── BraviaTheatre.Core/              # Core protocol library (.NET 9)
-│   │   ├── Auth/                        # Sony Seeds OAuth PKCE generator & REST client
-│   │   ├── Discovery/                   # Multi-interface mDNS listener + subnet scanner
-│   │   ├── Engine/                      # Non-blocking gRPC client & command queue engine
-│   │   ├── Models/                      # State models & codec classification taxonomy
-│   │   ├── Protos/                      # Sony gRPC ControlDevice service protobuf definitions
-│   │   └── Wire/                        # Bit-for-bit protobuf wire codecs & HMAC signing
-│   └── BraviaTheatre.UI/                # Native Windows 11 WPF application
-│       ├── Models/                      # AppSettings model
-│       ├── Services/                    # Native Win32 tray wrapper (Shell_NotifyIconW) & Global Hotkeys
-│       └── Views/                       # Windows 11 Fluent Flyout, Settings Dialog, & Setup Wizard
+│   ├── BraviaTheatre.Core/
+│   │   ├── Auth/       Sony OAuth and credential models
+│   │   ├── Discovery/  mDNS parsing and bounded LAN discovery
+│   │   ├── Engine/     gRPC client, state engine, and command queue
+│   │   ├── Models/     state and codec taxonomy
+│   │   ├── Protos/     Sony control-service definitions
+│   │   └── Wire/       bounded protobuf codecs and HMAC helpers
+│   └── BraviaTheatre.UI/
+│       ├── Models/     application settings
+│       ├── Services/   credential store, tray, hotkeys, and startup
+│       └── Views/      flyout, settings, device selection, and sign-in
 └── tests/
-    └── BraviaTheatre.Tests/             # Automated xUnit wire codec test suite
+    └── BraviaTheatre.Tests/
 ```
-
----
-
-## Running Automated Tests
-
-To execute the unit test suite covering wire serialization, HMAC token generation, and codec mapping:
-
-```bat
-dotnet test
-```
-
----
 
 ## Acknowledgments
 
-Special thanks to **Ryan Ludwig** ([@steamEngineer](https://github.com/steamEngineer)) for his reverse engineering work and development of the [`pybravia-connect`](https://github.com/steamEngineer/pybravia-connect) library, which served as the reference foundation for Sony's encrypted local audio control protocol.
-
----
+Special thanks to Ryan Ludwig ([@steamEngineer](https://github.com/steamEngineer)) for the reverse-engineering work in [`pybravia-connect`](https://github.com/steamEngineer/pybravia-connect), which provided the reference foundation for this implementation.
 
 ## Disclaimer
 
-This is an independent, open-source project and is not affiliated with, sponsored by, or endorsed by Sony Corporation. Sony, BRAVIA, BRAVIA Theatre, 360 Spatial Sound Mapping, Dolby, Dolby Atmos, Dolby Audio, DTS, and DTS:X are trademarks of their respective owners.
+This independent open-source project is not affiliated with, sponsored by, or endorsed by Sony Corporation. Sony, BRAVIA, BRAVIA Theatre, 360 Spatial Sound Mapping, Dolby, Dolby Atmos, Dolby Audio, DTS, and DTS:X are trademarks of their respective owners.

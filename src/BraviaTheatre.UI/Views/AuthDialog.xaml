@@ -92,7 +92,7 @@
                                     <TextBlock Text="3. Open the Network tab and enable 'Preserve log'." Foreground="#D0D0D0" FontSize="11.5" Margin="0,2"/>
                                     <TextBlock Text="4. Log into your Sony account." Foreground="#D0D0D0" FontSize="11.5" Margin="0,2"/>
                                     <TextBlock Text="5. Filter for 'ssh' and copy the redirect URL (starting with ssh-app://signin?code=...)." Foreground="#D0D0D0" FontSize="11.5" Margin="0,2"/>
-                                    <TextBlock Text="6. Paste the copied URL into the box below and click Complete &amp; Connect." Foreground="#D0D0D0" FontSize="11.5" Margin="0,2"/>
+                                    <TextBlock Text="6. Paste the complete callback URL into the box below and click Complete &amp; Connect." Foreground="#D0D0D0" FontSize="11.5" Margin="0,2"/>
                                 </StackPanel>
                             </ScrollViewer>
 
@@ -105,8 +105,8 @@
                                     </Button.Resources>
                                 </Button>
 
-                                <TextBlock Text="Authorization Code / Redirect URL:" FontSize="11" Foreground="#888888" Margin="0,0,0,4"/>
-                                <TextBox x:Name="TxtAuthCode" Height="30" Background="#161616" Foreground="#4CC2FF" BorderBrush="#444444" BorderThickness="1" Padding="6,2" VerticalContentAlignment="Center" FontFamily="Consolas, Segoe UI" FontSize="11.5"/>
+                                <TextBlock Text="Complete ssh-app:// callback URL:" FontSize="11" Foreground="#A8A8A8" Margin="0,0,0,4"/>
+                                <TextBox x:Name="TxtAuthCode" Height="30" Background="#161616" Foreground="#4CC2FF" BorderBrush="#444444" BorderThickness="1" Padding="6,2" VerticalContentAlignment="Center" FontFamily="Consolas, Segoe UI" FontSize="11.5" AutomationProperties.Name="Sony callback URL"/>
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -118,7 +118,7 @@
                 <Button x:Name="BtnToggleMode" Content="Switch to Manual Mode (F12)" Background="Transparent" Foreground="#4CC2FF" BorderThickness="0" Cursor="Hand" FontSize="11.5" VerticalAlignment="Center" Click="BtnToggleMode_Click"/>
 
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="BtnCancel" Content="Cancel" Width="75" Height="30" Background="#2C2C2C" Foreground="#D0D0D0" BorderBrush="#3C3C3C" BorderThickness="1" Margin="0,0,8,0" Cursor="Hand" Click="BtnCancel_Click">
+                    <Button x:Name="BtnCancel" Content="Cancel" IsCancel="True" Width="75" Height="30" Background="#2C2C2C" Foreground="#D0D0D0" BorderBrush="#3C3C3C" BorderThickness="1" Margin="0,0,8,0" Cursor="Hand" Click="BtnCancel_Click">
                         <Button.Resources>
                             <Style TargetType="Border">
                                 <Setter Property="CornerRadius" Value="6"/>
@@ -126,7 +126,7 @@
                         </Button.Resources>
                     </Button>
 
-                    <Button x:Name="BtnManualComplete" Content="Complete &amp; Connect" Width="140" Height="30" Background="#4CC2FF" Foreground="#000000" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Visibility="Collapsed" Click="BtnComplete_Click">
+                    <Button x:Name="BtnManualComplete" Content="Complete &amp; Connect" IsDefault="True" Width="140" Height="30" Background="#4CC2FF" Foreground="#000000" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Visibility="Collapsed" Click="BtnComplete_Click">
                         <Button.Resources>
                             <Style TargetType="Border">
                                 <Setter Property="CornerRadius" Value="6"/>

@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Text.Json;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -17,25 +16,42 @@ public partial class App : Application
 {
     private const string MutexName = "BraviaTheatrePC_SingleInstance_Mutex_2026";
     private Mutex? _singleInstanceMutex;
+    private bool _ownsSingleInstanceMutex;
 
     private BraviaEngine? _engine;
+    private Action<SoundbarState>? _engineStateChangedHandler;
+    private long _engineGeneration;
     private FlyoutWindow? _flyout;
     private NativeTrayIcon? _trayIcon;
     private GlobalHotkeyService? _hotkeyService;
+    private SonyCredentialStore? _credentialStore;
+    private SonyCredentials? _credentials;
     private AppSettings _settings = new();
+    private SettingsWindow? _settingsWindow;
+    private AuthDialog? _authDialog;
+    private bool _isShuttingDown;
+    private bool _startupCompleted;
+
+    private readonly object _pendingStateLock = new();
+    private PendingEngineState? _pendingState;
+    private int _stateDispatchPending;
+
+    private readonly record struct PendingEngineState(long Generation, SoundbarState State);
 
     private MenuItem? _headerMenuItem;
 
-    private string _keysPath = "session_keys.json";
     public static string GetAppDataDir()
     {
-        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BraviaTheatrePC");
+        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BraviaTheatrePC");
         if (!Directory.Exists(dir))
         {
             try { Directory.CreateDirectory(dir); } catch { }
         }
         return dir;
     }
+
+    private static string GetLegacyRoamingAppDataDir() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BraviaTheatrePC");
 
     public enum AppLogLevel
     {
@@ -127,8 +143,10 @@ public partial class App : Application
 
         AppDomain.CurrentDomain.UnhandledException += (s, args) =>
         {
-            Log($"FATAL UNHANDLED EXCEPTION: {args.ExceptionObject}");
-            MessageBox.Show($"Fatal error:\n\n{args.ExceptionObject}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            var failureType = args.ExceptionObject?.GetType().Name ?? "UnknownFailure";
+            Log($"FATAL UNHANDLED EXCEPTION ({failureType}).");
+            MessageBox.Show("A fatal application error occurred. Restart BRAVIA Theatre PC and try again.",
+                "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         };
 
         DispatcherUnhandledException += (s, args) =>
@@ -138,9 +156,12 @@ public partial class App : Application
                 args.Handled = true;
                 return;
             }
-            Log($"DISPATCHER UNHANDLED EXCEPTION: {args.Exception}");
-            MessageBox.Show($"Dispatcher error:\n\n{args.Exception.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            Log($"DISPATCHER UNHANDLED EXCEPTION ({args.Exception.GetType().Name}).");
+            MessageBox.Show("An application error occurred. Please try the action again.",
+                "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
+            if (!_startupCompleted)
+                Dispatcher.BeginInvoke(ShutdownApp);
         };
 
         Log("Application starting...");
@@ -148,6 +169,7 @@ public partial class App : Application
         base.OnStartup(e);
 
         _singleInstanceMutex = new Mutex(true, MutexName, out bool createdNew);
+        _ownsSingleInstanceMutex = createdNew;
         if (!createdNew)
         {
             Log("Another instance is already running. Signaling Quick Settings flyout.");
@@ -157,52 +179,34 @@ public partial class App : Application
             return;
         }
 
-        _settings = AppSettings.Load();
+        _settings = AppSettings.Load(out var settingsWarning);
         SetLogLevel(_settings.LogLevel);
+        if (!string.IsNullOrWhiteSpace(settingsWarning))
+            MessageBox.Show(settingsWarning, "Settings Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
 
-        // Locate session_keys.json (check next to EXE first, then AppData, then dev parent)
         var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppDomain.CurrentDomain.BaseDirectory;
-        var localKeys = Path.Combine(exeDir, "session_keys.json");
-        var appDataKeys = Path.Combine(GetAppDataDir(), "session_keys.json");
+        _credentialStore = new SonyCredentialStore(Path.Combine(GetAppDataDir(), "credentials.dat"));
+        var credentialResult = _credentialStore.LoadOrMigrate(new[]
+        {
+            Path.Combine(exeDir, "session_keys.json"),
+            Path.Combine(GetLegacyRoamingAppDataDir(), "session_keys.json")
+        });
+        if (!string.IsNullOrWhiteSpace(credentialResult.Message))
+            MessageBox.Show(credentialResult.Message, "Credential Storage", MessageBoxButton.OK, MessageBoxImage.Warning);
 
-        if (File.Exists(localKeys))
+        _credentials = credentialResult.Credentials;
+        if (_credentials?.IsValid != true)
         {
-            _keysPath = localKeys;
-        }
-        else if (File.Exists(appDataKeys))
-        {
-            _keysPath = appDataKeys;
-        }
-        else
-        {
-            var parentKeys = Path.Combine(exeDir, "..", "..", "..", "session_keys.json");
-            if (File.Exists(parentKeys))
-            {
-                _keysPath = Path.GetFullPath(parentKeys);
-            }
-            else
-            {
-                _keysPath = appDataKeys;
-            }
-        }
-        Log($"Using session keys path: {_keysPath}");
-
-        var creds = SonyCredentials.LoadFromFile(_keysPath);
-        if (creds == null || string.IsNullOrEmpty(creds.HmacKey))
-        {
-            Log("Credentials not found or missing HmacKey. Opening AuthDialog...");
-            var authDlg = new AuthDialog(_keysPath);
-            var result = authDlg.ShowDialog();
-            if (result != true)
+            Log("Valid protected credentials were not found. Opening AuthDialog...");
+            if (!ShowAuthDialog(restartEngine: false))
             {
                 Log("AuthDialog cancelled. Shutting down.");
                 Shutdown();
                 return;
             }
-            creds = SonyCredentials.LoadFromFile(_keysPath);
         }
 
-        if (creds == null || string.IsNullOrEmpty(creds.HmacKey))
+        if (_credentials?.IsValid != true)
         {
             Log("No valid credentials after AuthDialog. Shutting down.");
             MessageBox.Show("Valid Sony credentials are required to run.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -212,40 +216,10 @@ public partial class App : Application
 
         Log("Credentials loaded successfully.");
 
-        // Static host/port from settings or config.json
-        string? host = string.IsNullOrWhiteSpace(_settings.StaticHost) ? null : _settings.StaticHost;
-        int port = _settings.StaticPort > 0 ? _settings.StaticPort : 55051;
-
-        // Initialize Core Engine
-        _engine = new BraviaEngine(creds, host, port)
-        {
-            LogAction = Log
-        };
-
-        // Initialize Flyout
-        _flyout = new FlyoutWindow(_engine, _settings, OpenSettingsWindow);
-
-        // Initialize Global Hotkeys
-        _hotkeyService = new GlobalHotkeyService(_engine);
-        if (_settings.EnableGlobalHotkeys)
-        {
-            try
-            {
-                _hotkeyService.Register(_settings);
-                Log("Global hotkeys registered.");
-            }
-            catch (Exception ex)
-            {
-                Log($"Hotkey registration warning: {ex.Message}");
-            }
-        }
-
         // Initialize System Tray
         InitializeTray();
-
-        _engine.StateChanged += OnEngineStateChanged;
-        _engine.Start();
-        Log("Engine started and running in system tray.");
+        ReplaceEngine(_credentials);
+        _startupCompleted = true;
     }
 
     private void InitializeTray()
@@ -253,10 +227,11 @@ public partial class App : Application
         Log("Initializing Native System Tray Icon...");
         _trayIcon = new NativeTrayIcon
         {
-            LeftClickAction = () =>
+            LogAction = message => Log(message, AppLogLevel.Info),
+            ShowAction = () =>
             {
-                Log("Tray left-clicked. Toggling flyout...");
-                _flyout?.ToggleFlyout();
+                Log("Tray activated. Showing flyout...");
+                ShowPrimarySurface();
             }
         };
 
@@ -272,7 +247,7 @@ public partial class App : Application
         menu.Items.Add(_headerMenuItem);
 
         var openItem = new MenuItem { Header = "Open Quick Controls" };
-        openItem.Click += (s, e) => _flyout?.ToggleFlyout();
+        openItem.Click += (s, e) => ShowPrimarySurface();
         menu.Items.Add(openItem);
 
         menu.Items.Add(new Separator());
@@ -282,11 +257,7 @@ public partial class App : Application
         menu.Items.Add(settingsItem);
 
         var setupItem = new MenuItem { Header = "Sony Account Setup…" };
-        setupItem.Click += (s, e) =>
-        {
-            var authDlg = new AuthDialog(_keysPath);
-            authDlg.ShowDialog();
-        };
+        setupItem.Click += (s, e) => ShowAuthDialog(restartEngine: true);
         menu.Items.Add(setupItem);
 
         menu.Items.Add(new Separator());
@@ -296,108 +267,262 @@ public partial class App : Application
         menu.Items.Add(exitItem);
 
         _trayIcon.ContextMenu = menu;
-        _trayIcon.Show(IconHelper.GetTrayIcon("idle"), "BRAVIA Theatre PC");
-        Log("Native System Tray Icon shown.");
+        if (_trayIcon.Show(IconHelper.GetTrayIcon("idle"), "BRAVIA Theatre PC"))
+            Log("Native System Tray Icon shown.");
+        else
+            Log("Native System Tray Icon failed to initialize.");
     }
 
     private void OpenSettingsWindow()
     {
-        var win = new SettingsWindow(_settings, () =>
+        if (_settingsWindow != null)
         {
-            var authDlg = new AuthDialog(_keysPath);
-            authDlg.ShowDialog();
-        });
+            _settingsWindow.Activate();
+            return;
+        }
+
+        var previousSettings = _settings;
+        var win = new SettingsWindow(_settings, () => ShowAuthDialog(restartEngine: true));
+        _settingsWindow = win;
+        win.Closed += (_, _) => _settingsWindow = null;
 
         win.SettingsSaved += (updated) =>
         {
             _settings = updated;
             SetLogLevel(_settings.LogLevel);
-            _flyout?.ApplySettings(_settings);
+            var connectionChanged =
+                !string.Equals(previousSettings.StaticHost?.Trim(), updated.StaticHost?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                previousSettings.StaticPort != updated.StaticPort;
 
-            if (_settings.EnableGlobalHotkeys)
+            if (connectionChanged && _credentials?.IsValid == true)
             {
-                _hotkeyService?.Register(_settings);
+                ReplaceEngine(_credentials);
             }
             else
             {
-                _hotkeyService?.Unregister();
+                _flyout?.ApplySettings(_settings);
+                ApplyHotkeySettings(showUserError: true);
             }
         };
 
         win.ShowDialog();
     }
 
-    private void OnEngineStateChanged(SoundbarState state)
+    private bool ShowAuthDialog(bool restartEngine)
     {
-        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        if (_credentialStore == null) return false;
+        if (_authDialog != null)
+        {
+            _authDialog.Activate();
+            return false;
+        }
+
+        var dialog = new AuthDialog(_credentialStore);
+        _authDialog = dialog;
+        try
+        {
+            if (dialog.ShowDialog() != true || dialog.AuthenticatedCredentials?.IsValid != true)
+                return false;
+
+            _credentials = dialog.AuthenticatedCredentials;
+            if (restartEngine) ReplaceEngine(_credentials);
+            return true;
+        }
+        finally
+        {
+            _authDialog = null;
+        }
+    }
+
+    private void ReplaceEngine(SonyCredentials credentials)
+    {
+        var oldEngine = _engine;
+        var generation = InvalidateEngineState(oldEngine);
+        ApplyStateToUi(SoundbarState.Disconnected);
+        try { _hotkeyService?.Dispose(); } catch (Exception ex) { Log($"Hotkey cleanup warning: {ex.Message}"); }
+        try { _flyout?.CloseForShutdown(); } catch (Exception ex) { Log($"Flyout cleanup warning: {ex.Message}"); }
+        try
+        {
+            oldEngine?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            Log($"Engine cleanup warning: {ex.Message}");
+        }
+
+        var host = string.IsNullOrWhiteSpace(_settings.StaticHost) ? null : _settings.StaticHost.Trim();
+        var port = _settings.StaticPort is >= 1 and <= 65535 ? _settings.StaticPort : 55051;
+        var newEngine = new BraviaEngine(credentials, host, port) { LogAction = Log };
+        _engine = newEngine;
+        _flyout = new FlyoutWindow(newEngine, _settings, OpenSettingsWindow);
+        _hotkeyService = new GlobalHotkeyService(newEngine);
+        ApplyHotkeySettings(showUserError: false);
+        _engineStateChangedHandler = state => OnEngineStateChanged(generation, state);
+        newEngine.StateChanged += _engineStateChangedHandler;
+        newEngine.Start();
+        Log("Engine started and running in system tray.");
+    }
+
+    private long InvalidateEngineState(BraviaEngine? engine)
+    {
+        var generation = Interlocked.Increment(ref _engineGeneration);
+        var handler = _engineStateChangedHandler;
+        _engineStateChangedHandler = null;
+        lock (_pendingStateLock) _pendingState = null;
+        if (engine != null && handler != null) engine.StateChanged -= handler;
+        return generation;
+    }
+
+    private void ApplyHotkeySettings(bool showUserError)
+    {
+        if (_hotkeyService == null) return;
+        var result = _settings.EnableGlobalHotkeys
+            ? _hotkeyService.Register(_settings)
+            : new HotkeyOperationResult(true, "Global hotkeys are disabled.");
+        if (!_settings.EnableGlobalHotkeys) _hotkeyService.Unregister();
+
+        if (result.Success)
+        {
+            Log(result.Message);
+            return;
+        }
+
+        Log($"Hotkey registration failed: {result.Message}");
+        if (showUserError)
+        {
+            var rollback = result.PreviousBindingsRestored ? "\n\nThe previous shortcuts remain active." : "";
+            MessageBox.Show(result.Message + rollback, "Global Hotkeys", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void ShowPrimarySurface()
+    {
+        if (_authDialog != null) { _authDialog.Activate(); return; }
+        if (_settingsWindow != null) { _settingsWindow.Activate(); return; }
+        _flyout?.ShowFlyout();
+    }
+
+    private void OnEngineStateChanged(long generation, SoundbarState state)
+    {
+        if (generation != Volatile.Read(ref _engineGeneration) ||
+            Dispatcher.HasShutdownStarted ||
+            Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
 
         Log($"State updated: Connected={state.Connected}, Power={state.Power}, Vol={state.Volume}, Codec={state.Codec}, Ch={state.Channel}, Voice={state.VoiceMode}, Inp={state.Function}", AppLogLevel.Verbose);
+        lock (_pendingStateLock)
+        {
+            if (generation != Volatile.Read(ref _engineGeneration)) return;
+            _pendingState = new PendingEngineState(generation, state);
+        }
+        SchedulePendingStateDispatch();
+    }
+
+    private void SchedulePendingStateDispatch()
+    {
+        if (Interlocked.Exchange(ref _stateDispatchPending, 1) != 0) return;
         try
         {
             Dispatcher.BeginInvoke(() =>
             {
-                if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
-
-                if (_trayIcon != null)
+                PendingEngineState? latest;
+                lock (_pendingStateLock)
                 {
-                    string tooltip;
-                    if (!state.Connected)
-                    {
-                        tooltip = "BRAVIA Theatre PC • Connecting...";
-                    }
-                    else if (!state.Power)
-                    {
-                        tooltip = $"{state.DeviceName ?? "BRAVIA Theatre"} • Standby";
-                    }
-                    else
-                    {
-                        string muteText = state.Mute ? " (Muted)" : "";
-                        tooltip = $"{state.DeviceName ?? "BRAVIA Theatre"} • {state.HumanCodec} • Vol: {state.Volume}{muteText}";
-                    }
-
-                    _trayIcon.UpdateIcon(IconHelper.GetTrayIcon(state.CodecBadgeKind), tooltip);
+                    latest = _pendingState;
+                    _pendingState = null;
+                }
+                Interlocked.Exchange(ref _stateDispatchPending, 0);
+                if (latest is { } pending &&
+                    pending.Generation == Volatile.Read(ref _engineGeneration) &&
+                    !Dispatcher.HasShutdownStarted &&
+                    !Dispatcher.HasShutdownFinished)
+                {
+                    ApplyStateToUi(pending.State);
                 }
 
-                if (_headerMenuItem != null)
+                lock (_pendingStateLock)
                 {
-                    _headerMenuItem.Header = state.Power ? $"{state.HumanCodec} | Vol: {state.Volume}" : "Standby";
+                    if (_pendingState != null) SchedulePendingStateDispatch();
                 }
-
-                _flyout?.UpdateState(state);
             });
         }
-        catch { }
+        catch
+        {
+            Interlocked.Exchange(ref _stateDispatchPending, 0);
+        }
+    }
+
+    private void ApplyStateToUi(SoundbarState state)
+    {
+        if (_trayIcon != null)
+        {
+            var tooltip = !state.Connected
+                ? "BRAVIA Theatre PC • Disconnected — retrying..."
+                : !state.Power
+                    ? $"{state.DeviceName ?? "BRAVIA Theatre"} • Standby"
+                    : $"{state.DeviceName ?? "BRAVIA Theatre"} • {state.HumanCodec} • Vol: {state.Volume}{(state.Mute ? " (Muted)" : "")}";
+            _trayIcon.UpdateIcon(IconHelper.GetTrayIcon(state.CodecBadgeKind), tooltip);
+        }
+
+        if (_headerMenuItem != null)
+        {
+            _headerMenuItem.Header = !state.Connected
+                ? "BRAVIA Theatre | Disconnected — retrying..."
+                : state.Power ? $"{state.HumanCodec} | Vol: {state.Volume}" : "Standby";
+        }
+
+        _flyout?.UpdateState(state);
     }
 
     private void ShutdownApp()
     {
+        if (_isShuttingDown) return;
         Log("Shutting down application.");
-        try
-        {
-            _hotkeyService?.Dispose();
-            _engine?.Dispose();
-            _trayIcon?.Dispose();
-            _singleInstanceMutex?.ReleaseMutex();
-            _singleInstanceMutex?.Dispose();
-        }
-        catch { }
-        finally
-        {
-            Shutdown();
-        }
+        CleanupApp();
+        Shutdown();
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         Log("Application exited.");
+        CleanupApp();
+        base.OnExit(e);
+    }
+
+    private void CleanupApp()
+    {
+        if (_isShuttingDown) return;
+        _isShuttingDown = true;
+
+        try { _authDialog?.Close(); } catch { }
+        try { _settingsWindow?.Close(); } catch { }
+        try { _hotkeyService?.Dispose(); } catch (Exception ex) { Log($"Hotkey cleanup warning: {ex.Message}"); }
+        try { InvalidateEngineState(_engine); } catch { }
         try
         {
-            _hotkeyService?.Dispose();
-            _engine?.Dispose();
-            _trayIcon?.Dispose();
-            _singleInstanceMutex?.Dispose();
+            _engine?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            Log($"Engine cleanup warning: {ex.Message}");
+        }
+        try { _flyout?.CloseForShutdown(); } catch (Exception ex) { Log($"Flyout cleanup warning: {ex.Message}"); }
+        try { _trayIcon?.Dispose(); } catch (Exception ex) { Log($"Tray cleanup warning: {ex.Message}"); }
+        try { IconHelper.DisposeCachedIcons(); } catch { }
+        try
+        {
+            if (_ownsSingleInstanceMutex) _singleInstanceMutex?.ReleaseMutex();
         }
         catch { }
-        base.OnExit(e);
+        try { _singleInstanceMutex?.Dispose(); } catch { }
+
+        _hotkeyService = null;
+        _engine = null;
+        _flyout = null;
+        _trayIcon = null;
+        _singleInstanceMutex = null;
+        _ownsSingleInstanceMutex = false;
     }
 }
