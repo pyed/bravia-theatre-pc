@@ -30,6 +30,13 @@ public partial class FlyoutWindow : Window
     private static readonly Geometry SpeakerUnmutedGeometry = Geometry.Parse("M2,8v8h4l6,5V3L6,8H2z M16.5,8c.9,1.1 1.5,2.5 1.5,4s-.6,2.9-1.5,4l-1.5-1.5c.6-.7 1-1.6 1-2.5s-.4-1.8-1-2.5L16.5,8z M19,5.5c1.9,1.7 3,4 3,6.5s-1.1,4.8-3,6.5l-1.5-1.5c1.5-1.3 2.5-3.1 2.5-5s-1-3.7-2.5-5L19,5.5z");
     private static readonly Geometry SpeakerMutedGeometry = Geometry.Parse("M2,8v8h4l6,5V3L6,8H2z M15.4,9.4L18,12l-2.6,2.6 1.4,1.4 2.6-2.6 2.6,2.6 1.4-1.4L20.8,12l2.6-2.6-1.4-1.4-2.6,2.6-2.6-2.6-1.4,1.4z");
 
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
+
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    private const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
+    private const int DWMSBT_TRANSIENTWINDOW = 3; // Acrylic backdrop
+
     public FlyoutWindow(BraviaEngine engine, AppSettings settings, Action onOpenSettings)
     {
         InitializeComponent();
@@ -46,6 +53,20 @@ public partial class FlyoutWindow : Window
 
         SliderVolume.PreviewMouseDown += (s, e) => _isDraggingSlider = true;
         SliderVolume.PreviewMouseUp += (s, e) => _isDraggingSlider = false;
+    }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        try
+        {
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            int darkMode = 1;
+            DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
+            int backdrop = DWMSBT_TRANSIENTWINDOW;
+            DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
+        }
+        catch { }
     }
 
     public void ApplySettings(AppSettings settings)
@@ -67,9 +88,65 @@ public partial class FlyoutWindow : Window
         else
         {
             PositionNearTray();
+            Opacity = 0;
+            FlyoutTransform.Y = 12;
             Show();
-            PositionNearTray();
             Activate();
+
+            var fadeIn = new System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, TimeSpan.FromMilliseconds(120))
+            {
+                EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+            };
+            var slideUp = new System.Windows.Media.Animation.DoubleAnimation(12.0, 0.0, TimeSpan.FromMilliseconds(120))
+            {
+                EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+            };
+
+            BeginAnimation(OpacityProperty, fadeIn);
+            FlyoutTransform.BeginAnimation(TranslateTransform.YProperty, slideUp);
+        }
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+
+        if (e.Key == Key.Escape)
+        {
+            Hide();
+            e.Handled = true;
+        }
+        else if (e.Key is Key.Up or Key.Add or Key.VolumeUp)
+        {
+            int newVol = Math.Clamp(_engine.CurrentState.Volume + 1, 0, 100);
+            _ = _engine.SetVolumeAsync(newVol);
+            e.Handled = true;
+        }
+        else if (e.Key is Key.Down or Key.Subtract or Key.VolumeDown)
+        {
+            int newVol = Math.Clamp(_engine.CurrentState.Volume - 1, 0, 100);
+            _ = _engine.SetVolumeAsync(newVol);
+            e.Handled = true;
+        }
+        else if (e.Key is Key.M or Key.VolumeMute)
+        {
+            _ = _engine.ToggleMuteAsync();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.N)
+        {
+            _ = _engine.ToggleNightModeAsync();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.S)
+        {
+            _ = _engine.ToggleSoundFieldAsync();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.V)
+        {
+            _ = _engine.ToggleVoiceModeAsync();
+            e.Handled = true;
         }
     }
 

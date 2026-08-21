@@ -340,7 +340,22 @@ public partial class App : Application
 
                 if (_trayIcon != null)
                 {
-                    _trayIcon.UpdateIcon(IconHelper.GetTrayIcon(state.CodecBadgeKind), state.HumanCodec);
+                    string tooltip;
+                    if (!state.Connected)
+                    {
+                        tooltip = "BRAVIA Theatre PC\nConnecting / Offline";
+                    }
+                    else if (!state.Power)
+                    {
+                        tooltip = $"{state.DeviceName ?? "BRAVIA Theatre"}\nStandby";
+                    }
+                    else
+                    {
+                        string muteText = state.Mute ? " (Muted)" : "";
+                        tooltip = $"{state.DeviceName ?? "BRAVIA Theatre"}\n{state.HumanCodec} • Vol: {state.Volume}{muteText}";
+                    }
+
+                    _trayIcon.UpdateIcon(IconHelper.GetTrayIcon(state.CodecBadgeKind), tooltip);
                 }
 
                 if (_headerMenuItem != null)

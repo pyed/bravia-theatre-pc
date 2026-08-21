@@ -173,13 +173,25 @@
 
                     <!-- Account & Authentication -->
                     <TextBlock Text="SONY ACCOUNT" Foreground="#4CC2FF" FontSize="11" FontWeight="Bold" Margin="0,0,0,8"/>
-                    <Border Background="#262626" BorderBrush="#333333" BorderThickness="1" CornerRadius="8" Padding="14,12">
+                    <Border Background="#262626" BorderBrush="#333333" BorderThickness="1" CornerRadius="8" Padding="14,12" Margin="0,0,0,16">
                         <DockPanel>
                             <StackPanel VerticalAlignment="Center">
                                 <TextBlock Text="Account Credentials" Foreground="#FFFFFF" FontSize="12.5" FontWeight="Medium"/>
                                 <TextBlock Text="Re-authenticate or pair a new device" Foreground="#888888" FontSize="11" Margin="0,2,0,0"/>
                             </StackPanel>
                             <Button Content="Re-authenticate" HorizontalAlignment="Right" Padding="12,6" Background="#333333" Foreground="#FFFFFF" BorderBrush="#444444" BorderThickness="1" Cursor="Hand" Click="BtnReAuth_Click"/>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- About & Updates -->
+                    <TextBlock Text="ABOUT &amp; UPDATES" Foreground="#4CC2FF" FontSize="11" FontWeight="Bold" Margin="0,0,0,8"/>
+                    <Border Background="#262626" BorderBrush="#333333" BorderThickness="1" CornerRadius="8" Padding="14,12">
+                        <DockPanel>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="GitHub Repository" Foreground="#FFFFFF" FontSize="12.5" FontWeight="Medium"/>
+                                <TextBlock Text="Check for releases, updates, and source code" Foreground="#888888" FontSize="11" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <Button Content="GitHub Releases ↗" HorizontalAlignment="Right" Padding="12,6" Background="#333333" Foreground="#4CC2FF" BorderBrush="#444444" BorderThickness="1" Cursor="Hand" Click="BtnCheckUpdates_Click"/>
                         </DockPanel>
                     </Border>
                 </StackPanel>

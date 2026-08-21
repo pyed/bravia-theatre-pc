@@ -154,6 +154,15 @@ public partial class SettingsWindow : Window
         _onReAuth.Invoke();
     }
 
+    private void BtnCheckUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://github.com/pyed/bravia-theatre-pc/releases") { UseShellExecute = true });
+        }
+        catch { }
+    }
+
     private static void ApplyStartupRegistry(bool enable)
     {
         try
