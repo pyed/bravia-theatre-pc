@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -14,7 +15,7 @@ using Jp.Co.Sony.Hes.Ssh.Controldevice.V1;
 
 namespace BraviaTheatre.Core.Engine;
 
-public sealed class BraviaClient : IDisposable
+public sealed class BraviaClient : IBraviaClient
 {
     private const string ServiceName = "jp.co.sony.hes.ssh.controldevice.v1.ControlDeviceService";
 
@@ -128,6 +129,10 @@ public sealed class BraviaClient : IDisposable
                 foreach (var (k, v) in dict)
                     result[k] = v;
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 // Unavailable or unsupported path (e.g. no rear speakers)
@@ -219,6 +224,16 @@ public sealed class BraviaClient : IDisposable
         var bodyBytes = startReq.ToByteArray();
 
         return _channel.CreateCallInvoker().AsyncServerStreamingCall(NotifyMethod, null, new CallOptions(cancellationToken: ct), bodyBytes);
+    }
+
+    async IAsyncEnumerable<byte[]> IBraviaClient.ReadNotificationsAsync(
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        using var notifyStream = StartNotifyStream(ct);
+        while (await notifyStream.ResponseStream.MoveNext(ct))
+        {
+            yield return notifyStream.ResponseStream.Current;
+        }
     }
 
     public void Dispose()
