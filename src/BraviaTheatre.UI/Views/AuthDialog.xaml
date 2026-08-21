@@ -1,77 +1,140 @@
 <Window x:Class="BraviaTheatre.UI.Views.AuthDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Sony Account Authentication"
-        Width="520" Height="500"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="Sony Account Sign-In - BRAVIA Theatre PC"
+        Width="540" Height="700"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
         WindowStartupLocation="CenterScreen"
-        Background="#1E1E1E"
-        Foreground="#FFFFFF"
-        ResizeMode="NoResize">
+        ResizeMode="NoResize"
+        Loaded="Window_Loaded">
 
-    <Grid Margin="24">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+    <Border CornerRadius="12" Background="#1E1E1E" BorderBrush="#383838" BorderThickness="1" Margin="10">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.55" Color="#000000"/>
+        </Border.Effect>
 
-        <!-- Header -->
-        <TextBlock Grid.Row="0" Text="Sony Account Setup" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" Margin="0,0,0,8"/>
-        <TextBlock Grid.Row="1" Text="Authenticate with your Sony account to enable local encrypted control of your BRAVIA Theatre system." Foreground="#B0B0B0" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,16"/>
+        <Grid Margin="20">
+            <Grid.RowDefinitions>
+                <!-- Title Bar -->
+                <RowDefinition Height="Auto"/>
+                <!-- Main Content Area -->
+                <RowDefinition Height="*"/>
+                <!-- Bottom Status / Footer Bar -->
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
 
-        <!-- Step-by-Step Instructions Card -->
-        <Border Grid.Row="2" Background="#262626" BorderBrush="#383838" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,0,0,16">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel>
-                    <TextBlock Text="Step 1: Open Sony Sign-In" FontWeight="SemiBold" FontSize="13" Foreground="#0078D7" Margin="0,0,0,4"/>
-                    <TextBlock Text="Click the button below to open Sony's official login page in your default browser." Foreground="#C0C0C0" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,12"/>
-
-                    <TextBlock Text="Step 2: Capture the Authorization Code" FontWeight="SemiBold" FontSize="13" Foreground="#0078D7" Margin="0,0,0,4"/>
-                    <TextBlock Text="1. In your browser, press F12 (or right-click -> Inspect) to open Developer Tools." Foreground="#C0C0C0" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,2"/>
-                    <TextBlock Text="2. Go to the Network tab and check the 'Preserve log' checkbox." Foreground="#C0C0C0" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,2"/>
-                    <TextBlock Text="3. Log in with your Sony account credentials." Foreground="#C0C0C0" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,2"/>
-                    <TextBlock Text="4. Filter the network requests with the keyword 'ssh' or 'signin'." Foreground="#C0C0C0" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,2"/>
-                    <TextBlock Text="5. Copy the full redirect URL (starting with ssh-app://signin?code=...)." Foreground="#C0C0C0" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,12"/>
-
-                    <TextBlock Text="Step 3: Paste Code Below" FontWeight="SemiBold" FontSize="13" Foreground="#0078D7" Margin="0,0,0,4"/>
-                    <TextBlock Text="Paste the copied link or authorization code into the field below and click Connect." Foreground="#C0C0C0" TextWrapping="Wrap" FontSize="11"/>
+            <!-- Title Bar -->
+            <DockPanel Grid.Row="0" Margin="0,0,0,12">
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Sony Account Sign-In" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="16"/>
+                    <TextBlock x:Name="TxtSubtitle" Text="Sign in with your Sony account to connect your BRAVIA Theatre system" Foreground="#888888" FontSize="11" Margin="0,2,0,0"/>
                 </StackPanel>
-            </ScrollViewer>
-        </Border>
 
-        <!-- Browser Button & Input Field -->
-        <StackPanel Grid.Row="3" Margin="0,0,0,16">
-            <Button x:Name="BtnOpenBrowser" Content="Open Sony Sign-In in Browser" Height="36" Background="#0078D7" Foreground="#FFFFFF" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Click="BtnOpenBrowser_Click" Margin="0,0,0,10">
-                <Button.Resources>
-                    <Style TargetType="Border">
-                        <Setter Property="CornerRadius" Value="6"/>
-                    </Style>
-                </Button.Resources>
-            </Button>
+                <Button x:Name="BtnCloseHeader" Content="✕" Width="28" Height="28" HorizontalAlignment="Right" Background="Transparent" Foreground="#A0A0A0" BorderThickness="0" Cursor="Hand" Click="BtnCancel_Click">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="4">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="b" Property="Background" Value="#333333"/>
+                                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </Button.Style>
+                </Button>
+            </DockPanel>
 
-            <TextBlock Text="Authorization Code / Redirect URL:" FontSize="12" Foreground="#D0D0D0" Margin="0,0,0,4"/>
-            <TextBox x:Name="TxtAuthCode" Height="32" Background="#161616" Foreground="#FFFFFF" BorderBrush="#444444" BorderThickness="1" Padding="8,4" VerticalContentAlignment="Center"/>
-        </StackPanel>
+            <!-- Main Content Area -->
+            <Grid Grid.Row="1" Margin="0,0,0,12">
+                <!-- Auto Mode: Embedded WebView2 Container -->
+                <Grid x:Name="PanelAutoMode">
+                    <Border CornerRadius="8" Background="#161616" BorderBrush="#333333" BorderThickness="1" ClipToBounds="True">
+                        <wv2:WebView2 x:Name="AuthWebView"/>
+                    </Border>
 
-        <!-- Footer Buttons -->
-        <DockPanel Grid.Row="4">
-            <Button x:Name="BtnCancel" Content="Cancel" Width="80" Height="32" Background="#333333" Foreground="#FFFFFF" BorderThickness="0" Cursor="Hand" Click="BtnCancel_Click" HorizontalAlignment="Left">
-                <Button.Resources>
-                    <Style TargetType="Border">
-                        <Setter Property="CornerRadius" Value="6"/>
-                    </Style>
-                </Button.Resources>
-            </Button>
+                    <!-- Loading / Exchanging Keys Overlay -->
+                    <Border x:Name="OverlayProgress" Background="#E6181818" CornerRadius="8" Visibility="Visible">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <ProgressBar IsIndeterminate="True" Width="180" Height="4" Foreground="#4CC2FF" Background="#333333" BorderThickness="0" Margin="0,0,0,16"/>
+                            <TextBlock x:Name="TxtProgressStatus" Text="Loading Sony Sign-In..." Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="13" TextAlignment="Center"/>
+                            <TextBlock Text="Please log in to your Sony BRAVIA Connect account" Foreground="#888888" FontSize="11" TextAlignment="Center" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
 
-            <Button x:Name="BtnComplete" Content="Complete &amp; Connect" Width="140" Height="32" Background="#267326" Foreground="#FFFFFF" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Click="BtnComplete_Click" HorizontalAlignment="Right">
-                <Button.Resources>
-                    <Style TargetType="Border">
-                        <Setter Property="CornerRadius" Value="6"/>
-                    </Style>
-                </Button.Resources>
-            </Button>
-        </DockPanel>
-    </Grid>
+                <!-- Manual Mode: Fallback Panel -->
+                <Grid x:Name="PanelManualMode" Visibility="Collapsed">
+                    <Border Background="#262626" BorderBrush="#333333" BorderThickness="1" CornerRadius="8" Padding="14">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock Text="Manual Authentication (Developer Tools)" FontWeight="SemiBold" FontSize="13" Foreground="#4CC2FF" Margin="0,0,0,8"/>
+                                    
+                                    <TextBlock Text="1. Click 'Open Sony Sign-In in Browser' below." Foreground="#D0D0D0" FontSize="11.5" Margin="0,2"/>
+                                    <TextBlock Text="2. In your browser, press F12 (or right-click -> Inspect) to open Developer Tools." Foreground="#D0D0D0" FontSize="11.5" Margin="0,2"/>
+                                    <TextBlock Text="3. Open the Network tab and enable 'Preserve log'." Foreground="#D0D0D0" FontSize="11.5" Margin="0,2"/>
+                                    <TextBlock Text="4. Log into your Sony account." Foreground="#D0D0D0" FontSize="11.5" Margin="0,2"/>
+                                    <TextBlock Text="5. Filter for 'ssh' and copy the redirect URL (starting with ssh-app://signin?code=...)." Foreground="#D0D0D0" FontSize="11.5" Margin="0,2"/>
+                                    <TextBlock Text="6. Paste the copied URL into the box below and click Complete &amp; Connect." Foreground="#D0D0D0" FontSize="11.5" Margin="0,2"/>
+                                </StackPanel>
+                            </ScrollViewer>
+
+                            <StackPanel Grid.Row="1">
+                                <Button x:Name="BtnOpenBrowser" Content="Open Sony Sign-In in Browser" Height="32" Background="#333333" Foreground="#FFFFFF" FontWeight="Medium" BorderBrush="#444444" BorderThickness="1" Cursor="Hand" Click="BtnOpenBrowser_Click" Margin="0,0,0,10">
+                                    <Button.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="CornerRadius" Value="6"/>
+                                        </Style>
+                                    </Button.Resources>
+                                </Button>
+
+                                <TextBlock Text="Authorization Code / Redirect URL:" FontSize="11" Foreground="#888888" Margin="0,0,0,4"/>
+                                <TextBox x:Name="TxtAuthCode" Height="30" Background="#161616" Foreground="#4CC2FF" BorderBrush="#444444" BorderThickness="1" Padding="6,2" VerticalContentAlignment="Center" FontFamily="Consolas, Segoe UI" FontSize="11.5"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
+
+            <!-- Bottom Status / Footer Bar -->
+            <DockPanel Grid.Row="2">
+                <Button x:Name="BtnToggleMode" Content="Switch to Manual Mode (F12)" Background="Transparent" Foreground="#4CC2FF" BorderThickness="0" Cursor="Hand" FontSize="11.5" VerticalAlignment="Center" Click="BtnToggleMode_Click"/>
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="BtnCancel" Content="Cancel" Width="75" Height="30" Background="#2C2C2C" Foreground="#D0D0D0" BorderBrush="#3C3C3C" BorderThickness="1" Margin="0,0,8,0" Cursor="Hand" Click="BtnCancel_Click">
+                        <Button.Resources>
+                            <Style TargetType="Border">
+                                <Setter Property="CornerRadius" Value="6"/>
+                            </Style>
+                        </Button.Resources>
+                    </Button>
+
+                    <Button x:Name="BtnManualComplete" Content="Complete &amp; Connect" Width="140" Height="30" Background="#4CC2FF" Foreground="#000000" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Visibility="Collapsed" Click="BtnComplete_Click">
+                        <Button.Resources>
+                            <Style TargetType="Border">
+                                <Setter Property="CornerRadius" Value="6"/>
+                            </Style>
+                        </Button.Resources>
+                    </Button>
+                </StackPanel>
+            </DockPanel>
+        </Grid>
+    </Border>
 </Window>

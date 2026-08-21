@@ -112,24 +112,28 @@ dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x6
 
 ## First-Time Sony Account Setup
 
-Sony BRAVIA Theatre devices derive local gRPC encryption keys from Sony Cloud OAuth sessions. The application includes a graphical setup wizard to generate your local `session_keys.json` credentials bundle.
+Sony BRAVIA Theatre devices derive local gRPC encryption keys from Sony Cloud OAuth sessions. The application features an integrated setup wizard with **automatic sign-in** and a manual fallback.
 
-### Step-by-Step Authentication Guide:
+### Automatic Sign-In (Recommended):
 
 1. Launch `BraviaTheatrePC.exe`.
-2. When prompted by the setup wizard, click **Open Sony Sign-In in Browser**.
-3. In the browser window that opens, press `F12` (or right-click and select **Inspect**) to open **Developer Tools**.
-4. In Developer Tools, navigate to the **Network** tab and ensure **Preserve log** is enabled.
-5. Log into your Sony account (the same account linked to your soundbar in the Sony BRAVIA Connect mobile application).
-6. Filter network requests by typing `signin` or `ssh`.
-7. Locate the redirect request starting with:
+2. The **Sony Account Sign-In** window will appear with the official Sony login page.
+3. Log in with your Sony account (the same account linked to your soundbar in the Sony BRAVIA Connect mobile app).
+4. The application **automatically intercepts** the sign-in callback, exchanges cryptographic keys, and connects immediately to your soundbar — no Developer Tools or copy-pasting required!
+
+### Manual Sign-In (Fallback / Developer Tools):
+
+If your account uses a third-party social provider or you prefer manual setup:
+1. Click **Switch to Manual Mode (F12)** at the bottom of the sign-in window.
+2. Click **Open Sony Sign-In in Browser**.
+3. In your browser, press `F12` (or right-click -> Inspect) to open Developer Tools and enable **Preserve log** in the **Network** tab.
+4. Log into Sony and locate the redirect request starting with:
    ```
    ssh-app://signin?code=...
    ```
-8. Copy the entire URL (or the authorization code value) and paste it into the setup dialog.
-9. Click **Complete & Connect**. The application will exchange tokens, query the soundbar on your local network, and save your credentials to `session_keys.json`.
+5. Copy and paste the redirect URL into the setup dialog and click **Complete & Connect**.
 
-> **Security Note:** `session_keys.json` contains encrypted session keys stored strictly on your local machine. It is excluded from version control via `.gitignore` and should never be shared publicly.
+> **Security Note:** `session_keys.json` contains encrypted session keys stored strictly on your local machine (`%APPDATA%\BraviaTheatrePC\`). It is excluded from version control via `.gitignore` and should never be shared publicly.
 
 ---
 
