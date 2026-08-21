@@ -343,16 +343,16 @@ public partial class App : Application
                     string tooltip;
                     if (!state.Connected)
                     {
-                        tooltip = "BRAVIA Theatre PC\nConnecting / Offline";
+                        tooltip = "BRAVIA Theatre PC • Connecting...";
                     }
                     else if (!state.Power)
                     {
-                        tooltip = $"{state.DeviceName ?? "BRAVIA Theatre"}\nStandby";
+                        tooltip = $"{state.DeviceName ?? "BRAVIA Theatre"} • Standby";
                     }
                     else
                     {
                         string muteText = state.Mute ? " (Muted)" : "";
-                        tooltip = $"{state.DeviceName ?? "BRAVIA Theatre"}\n{state.HumanCodec} • Vol: {state.Volume}{muteText}";
+                        tooltip = $"{state.DeviceName ?? "BRAVIA Theatre"} • {state.HumanCodec} • Vol: {state.Volume}{muteText}";
                     }
 
                     _trayIcon.UpdateIcon(IconHelper.GetTrayIcon(state.CodecBadgeKind), tooltip);

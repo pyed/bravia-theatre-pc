@@ -102,8 +102,9 @@ public sealed class NativeTrayIcon : IDisposable
 
     public void Show(Icon icon, string tooltip)
     {
+        _nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         _nid.hIcon = icon.Handle;
-        _nid.szTip = tooltip.Length > 127 ? tooltip[..127] : tooltip;
+        _nid.szTip = string.IsNullOrEmpty(tooltip) ? "BRAVIA Theatre PC" : (tooltip.Length > 127 ? tooltip[..127] : tooltip);
 
         if (!_isAdded)
         {
@@ -121,8 +122,9 @@ public sealed class NativeTrayIcon : IDisposable
     public void UpdateIcon(Icon icon, string tooltip)
     {
         if (!_isAdded) return;
+        _nid.uFlags = NIF_ICON | NIF_TIP;
         _nid.hIcon = icon.Handle;
-        _nid.szTip = tooltip.Length > 127 ? tooltip[..127] : tooltip;
+        _nid.szTip = string.IsNullOrEmpty(tooltip) ? "BRAVIA Theatre PC" : (tooltip.Length > 127 ? tooltip[..127] : tooltip);
         Shell_NotifyIcon(NIM_MODIFY, ref _nid);
     }
 
