@@ -1,8 +1,8 @@
-# BRAVIA Theatre PC (v2.0.0)
+# BRAVIA Theatre PC (v2.1.0)
 
 A high-performance, native Windows 11 system tray controller and Fluent Quick Settings flyout for modern Sony Home Audio systems, including the BRAVIA Theatre Bar 9 (HT-A9000), BRAVIA Theatre Bar 8 (HT-A8000), BRAVIA Theatre Quad (HT-A9M2), and compatible AV receivers.
 
-Rewritten entirely from the ground up in C# and .NET 9 with Windows Presentation Foundation (WPF), BRAVIA Theatre PC v2.0.0 delivers real-time audio bitstream identification directly in the Windows taskbar, instantaneous zero-latency volume adjustments, bass level calibration, input switching, and quick toggles for 360 Spatial Sound Mapping (Sound Field), Night Mode, Voice Mode, and Power.
+Rewritten entirely from the ground up in C# and .NET 9 with Windows Presentation Foundation (WPF), BRAVIA Theatre PC delivers real-time audio bitstream identification directly in the Windows taskbar, instantaneous zero-latency volume adjustments, bass level calibration, input switching, and quick toggles for 360 Spatial Sound Mapping (Sound Field), Night Mode, Voice Mode, and Power.
 
 All communication occurs locally over Sony's encrypted gRPC protocol (port 55051), providing instantaneous response times without routing telemetry or control commands through external cloud servers during active playback.
 
@@ -48,13 +48,19 @@ All communication occurs locally over Sony's encrypted gRPC protocol (port 55051
   - `Ctrl + Alt + V`: Toggle Voice Mode
   - `Ctrl + Alt + N`: Toggle Night Mode
   - *(All shortcuts are interactively customizable in the Settings window)*
-- **Dedicated Fluent Settings Window:** Windows 11 Fluent dialog for startup configuration, taskbar icon persistence, optional rear speaker level slider, and interactive global shortcut customization with live key recording.
+- **Integrated Automatic Sony Sign-In (WebView2):**
+  - Embedded in-app authentication dialog automatically intercepts Sony's OAuth callback and exchanges session keys seamlessly with zero manual DevTools or copy-pasting.
+  - Built-in manual fallback mode for third-party social logins or non-WebView environments.
+- **Configurable Diagnostics & Logging:**
+  - In-Settings log level selector (`Critical`, `Info`, `Verbose`). Default is `Critical` (completely silent during normal daily operation).
+  - One-click button in Settings to open the local log folder (`%APPDATA%\BraviaTheatrePC\`).
+  - Automatic 2 MB log rotation to ensure zero disk bloat.
+- **Dedicated Fluent Settings Window:** Windows 11 Fluent dialog for startup configuration, taskbar icon persistence, optional rear speaker level slider, logging levels, and interactive global shortcut customization with live key recording.
 - **High-Performance Non-Blocking Architecture:**
   - Background asynchronous command queuing with volume coalescing to prevent network bottlenecking during rapid slider movement.
   - Pure Win32 `Shell_NotifyIconW` integration with automatic explorer recovery upon `TaskbarCreated` messages.
 - **Local Network Auto-Discovery:**
   - Multi-interface mDNS discovery (`_sonysmarthome._tcp.local.`) coupled with parallel subnet TCP probing on port `55051`, finding devices in ~120ms.
-- **Built-in First-Time Setup Wizard:** Native graphical OAuth PKCE setup dialog that guides users step-by-step through Sony account authentication without manual command-line execution.
 
 ---
 
@@ -80,11 +86,11 @@ All communication occurs locally over Sony's encrypted gRPC protocol (port 55051
 
 1. Download **`BraviaTheatrePC.exe`** (~61 MB) from the latest [GitHub Releases](../../releases) page.
 2. Place the executable in any directory of your choice and run it (zero dependencies, no .NET installation required).
-3. On first launch, the **Sony Account Setup** wizard will open automatically to guide you through setup.
+3. On first launch, the **Sony Account Sign-In** wizard will open automatically to guide you through setup.
 
-#### Option 2: Ultra-Compact Lightweight Executable (3.5 MB)
+#### Option 2: Ultra-Compact Lightweight Executable (5.2 MB)
 
-1. Download **`BraviaTheatrePC-FrameworkDependent.exe`** (3.5 MB) from [GitHub Releases](../../releases).
+1. Download **`BraviaTheatrePC-FrameworkDependent.exe`** (5.2 MB) from [GitHub Releases](../../releases).
 2. Requires [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0) installed on your system.
 
 #### Option 3: Running from Source
@@ -119,7 +125,7 @@ Sony BRAVIA Theatre devices derive local gRPC encryption keys from Sony Cloud OA
 1. Launch `BraviaTheatrePC.exe`.
 2. The **Sony Account Sign-In** window will appear with the official Sony login page.
 3. Log in with your Sony account (the same account linked to your soundbar in the Sony BRAVIA Connect mobile app).
-4. The application **automatically intercepts** the sign-in callback, exchanges cryptographic keys, and connects immediately to your soundbar — no Developer Tools or copy-pasting required!
+4. The application **automatically intercepts** the sign-in callback, exchanges cryptographic keys, and connects immediately to your soundbar — no Developer Tools or copy-pasting required.
 
 ### Manual Sign-In (Fallback / Developer Tools):
 
