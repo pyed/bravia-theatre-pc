@@ -66,6 +66,7 @@ public sealed class NativeTrayIcon : IDisposable
     private readonly HwndSource _hwndSource;
     private readonly IntPtr _hwnd;
     private readonly uint _wmTaskbarCreated;
+    private readonly uint _wmShowFlyout;
     private NOTIFYICONDATA _nid;
     private bool _isAdded;
 
@@ -86,6 +87,7 @@ public sealed class NativeTrayIcon : IDisposable
         _hwnd = _hwndSource.Handle;
 
         _wmTaskbarCreated = RegisterWindowMessage("TaskbarCreated");
+        _wmShowFlyout = RegisterWindowMessage("BRAVIA_THEATRE_PC_SHOW_FLYOUT");
 
         _nid = new NOTIFYICONDATA
         {
@@ -139,6 +141,11 @@ public sealed class NativeTrayIcon : IDisposable
                 ShowContextMenu();
                 handled = true;
             }
+        }
+        else if (msg == (int)_wmShowFlyout)
+        {
+            LeftClickAction?.Invoke();
+            handled = true;
         }
         else if (msg == (int)_wmTaskbarCreated)
         {

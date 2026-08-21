@@ -112,6 +112,14 @@ public partial class App : Application
         Log(message, level);
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern uint RegisterWindowMessage(string lpString);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    private static readonly IntPtr HWND_BROADCAST = (IntPtr)0xffff;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         // Prevent application from closing when modal dialogs close
@@ -142,8 +150,9 @@ public partial class App : Application
         _singleInstanceMutex = new Mutex(true, MutexName, out bool createdNew);
         if (!createdNew)
         {
-            Log("Another instance is already running.");
-            MessageBox.Show("BRAVIA Theatre PC is already running in the system tray.", "Already Running", MessageBoxButton.OK, MessageBoxImage.Information);
+            Log("Another instance is already running. Signaling Quick Settings flyout.");
+            uint wmShowFlyout = RegisterWindowMessage("BRAVIA_THEATRE_PC_SHOW_FLYOUT");
+            PostMessage(HWND_BROADCAST, wmShowFlyout, IntPtr.Zero, IntPtr.Zero);
             Shutdown();
             return;
         }

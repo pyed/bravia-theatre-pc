@@ -23,6 +23,10 @@ public partial class SettingsWindow : Window
         _settings = settings;
         _onReAuth = onReAuth;
 
+        var ver = typeof(App).Assembly.GetName().Version;
+        string verStr = ver != null ? $"{ver.Major}.{ver.Minor}.{ver.Build}" : "2.1.0";
+        TxtAppVersion.Text = $"BRAVIA Theatre PC v{verStr}";
+
         ChkStartWithWindows.IsChecked = _settings.StartWithWindows;
         ChkAlwaysShowOnTaskbar.IsChecked = _settings.AlwaysShowOnTaskbar;
         ChkShowRearSpeaker.IsChecked = _settings.ShowRearSpeaker;

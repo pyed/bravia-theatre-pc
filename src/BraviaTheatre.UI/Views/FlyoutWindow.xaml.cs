@@ -73,12 +73,65 @@ public partial class FlyoutWindow : Window
         }
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    private const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct POINT { public int X; public int Y; }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+
     public void PositionNearTray()
     {
         UpdateLayout();
-        var workArea = SystemParameters.WorkArea;
         double w = ActualWidth > 0 ? ActualWidth : Width;
         double h = ActualHeight > 0 ? ActualHeight : 410;
+
+        try
+        {
+            if (GetCursorPos(out var cursorPt))
+            {
+                var hMon = MonitorFromPoint(cursorPt, MONITOR_DEFAULTTONEAREST);
+                var mi = new MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFO>() };
+                if (GetMonitorInfo(hMon, ref mi))
+                {
+                    var dpi = VisualTreeHelper.GetDpi(this);
+                    double dpiX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
+                    double dpiY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
+
+                    double workLeft = mi.rcWork.Left / dpiX;
+                    double workRight = mi.rcWork.Right / dpiX;
+                    double workTop = mi.rcWork.Top / dpiY;
+                    double workBottom = mi.rcWork.Bottom / dpiY;
+
+                    Left = Math.Max(workLeft + 10, workRight - w - 10);
+                    Top = Math.Max(workTop + 10, workBottom - h - 10);
+                    return;
+                }
+            }
+        }
+        catch { }
+
+        // Fallback to primary work area
+        var workArea = SystemParameters.WorkArea;
         Left = workArea.Right - w - 10;
         Top = workArea.Bottom - h - 10;
     }
