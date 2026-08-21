@@ -37,15 +37,49 @@ public partial class App : Application
         return dir;
     }
 
-    private static readonly object _logLock = new();
-    public static void Log(string message)
+    public enum AppLogLevel
     {
+        Critical = 0,
+        Info = 1,
+        Verbose = 2
+    }
+
+    private static AppLogLevel _currentLogLevel = AppLogLevel.Critical;
+
+    public static void SetLogLevel(string? levelStr)
+    {
+        _currentLogLevel = levelStr?.ToLowerInvariant() switch
+        {
+            "verbose" => AppLogLevel.Verbose,
+            "info" => AppLogLevel.Info,
+            _ => AppLogLevel.Critical
+        };
+    }
+
+    private static readonly object _logLock = new();
+
+    public static void Log(string message, AppLogLevel level)
+    {
+        if (level > _currentLogLevel) return;
+
         lock (_logLock)
         {
             try
             {
-                var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}";
+                var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [{level}] {message}";
                 var logPath = Path.Combine(GetAppDataDir(), "bravia_csharp.log");
+
+                if (File.Exists(logPath) && new FileInfo(logPath).Length > 2 * 1024 * 1024)
+                {
+                    try
+                    {
+                        var oldPath = Path.Combine(GetAppDataDir(), "bravia_csharp.log.old");
+                        if (File.Exists(oldPath)) File.Delete(oldPath);
+                        File.Move(logPath, oldPath);
+                    }
+                    catch { }
+                }
+
                 using var stream = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
                 using var writer = new StreamWriter(stream);
                 writer.WriteLine(line);
@@ -55,6 +89,27 @@ public partial class App : Application
                 // Ignore logging errors
             }
         }
+    }
+
+    public static void Log(string message)
+    {
+        bool isCritical = message.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                          message.Contains("exception", StringComparison.OrdinalIgnoreCase) ||
+                          message.Contains("fatal", StringComparison.OrdinalIgnoreCase) ||
+                          message.Contains("failed", StringComparison.OrdinalIgnoreCase);
+
+        bool isInfo = message.Contains("Starting", StringComparison.OrdinalIgnoreCase) ||
+                      message.Contains("Discovered", StringComparison.OrdinalIgnoreCase) ||
+                      message.Contains("handshake completed", StringComparison.OrdinalIgnoreCase) ||
+                      message.Contains("stream started", StringComparison.OrdinalIgnoreCase) ||
+                      message.Contains("Connecting", StringComparison.OrdinalIgnoreCase) ||
+                      message.Contains("Credentials loaded", StringComparison.OrdinalIgnoreCase) ||
+                      message.Contains("Global hotkeys registered", StringComparison.OrdinalIgnoreCase) ||
+                      message.Contains("Tray Icon shown", StringComparison.OrdinalIgnoreCase) ||
+                      message.Contains("Shutting down", StringComparison.OrdinalIgnoreCase);
+
+        var level = isCritical ? AppLogLevel.Critical : (isInfo ? AppLogLevel.Info : AppLogLevel.Verbose);
+        Log(message, level);
     }
 
     protected override void OnStartup(StartupEventArgs e)
@@ -94,6 +149,7 @@ public partial class App : Application
         }
 
         _settings = AppSettings.Load();
+        SetLogLevel(_settings.LogLevel);
 
         // Locate session_keys.json (check next to EXE first, then AppData, then dev parent)
         var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppDomain.CurrentDomain.BaseDirectory;
@@ -246,6 +302,7 @@ public partial class App : Application
         win.SettingsSaved += (updated) =>
         {
             _settings = updated;
+            SetLogLevel(_settings.LogLevel);
             _flyout?.ApplySettings(_settings);
 
             if (_settings.EnableGlobalHotkeys)
@@ -265,7 +322,7 @@ public partial class App : Application
     {
         if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
 
-        Log($"State updated: Connected={state.Connected}, Power={state.Power}, Vol={state.Volume}, Codec={state.Codec}, Ch={state.Channel}, Voice={state.VoiceMode}, Inp={state.Function}");
+        Log($"State updated: Connected={state.Connected}, Power={state.Power}, Vol={state.Volume}, Codec={state.Codec}, Ch={state.Channel}, Voice={state.VoiceMode}, Inp={state.Function}", AppLogLevel.Verbose);
         try
         {
             Dispatcher.BeginInvoke(() =>

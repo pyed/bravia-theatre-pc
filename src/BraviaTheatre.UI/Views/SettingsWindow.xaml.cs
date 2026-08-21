@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -32,6 +34,19 @@ public partial class SettingsWindow : Window
         TxtHotkeySoundField.Text = _settings.HotkeySoundField;
         TxtHotkeyVoiceMode.Text = _settings.HotkeyVoiceMode;
         TxtHotkeyNightMode.Text = _settings.HotkeyNightMode;
+
+        // Logging Level
+        foreach (ComboBoxItem item in CboLogLevel.Items)
+        {
+            if (string.Equals(item.Tag?.ToString(), _settings.LogLevel, StringComparison.OrdinalIgnoreCase))
+            {
+                CboLogLevel.SelectedItem = item;
+                break;
+            }
+        }
+        if (CboLogLevel.SelectedItem == null) CboLogLevel.SelectedIndex = 0;
+
+        TxtLogPath.Text = Path.Combine(App.GetAppDataDir(), "bravia_csharp.log");
     }
 
     private void HotkeyBox_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -81,6 +96,23 @@ public partial class SettingsWindow : Window
         TxtHotkeyNightMode.Text = "Ctrl + Alt + N";
     }
 
+    private void BtnOpenLogFolder_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var folder = App.GetAppDataDir();
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = folder,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Could not open logs folder: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void BtnSave_Click(object sender, RoutedEventArgs e)
     {
         _settings.StartWithWindows = ChkStartWithWindows.IsChecked ?? false;
@@ -94,6 +126,11 @@ public partial class SettingsWindow : Window
         _settings.HotkeySoundField = string.IsNullOrWhiteSpace(TxtHotkeySoundField.Text) ? "Ctrl + Alt + S" : TxtHotkeySoundField.Text;
         _settings.HotkeyVoiceMode = string.IsNullOrWhiteSpace(TxtHotkeyVoiceMode.Text) ? "Ctrl + Alt + V" : TxtHotkeyVoiceMode.Text;
         _settings.HotkeyNightMode = string.IsNullOrWhiteSpace(TxtHotkeyNightMode.Text) ? "Ctrl + Alt + N" : TxtHotkeyNightMode.Text;
+
+        if (CboLogLevel.SelectedItem is ComboBoxItem selectedItem && selectedItem.Tag != null)
+        {
+            _settings.LogLevel = selectedItem.Tag.ToString()!;
+        }
 
         ApplyStartupRegistry(_settings.StartWithWindows);
 

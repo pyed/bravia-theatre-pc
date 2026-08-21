@@ -21,6 +21,7 @@ public sealed class AppSettings
 
     public string? StaticHost { get; set; } = "";
     public int StaticPort { get; set; } = 55051;
+    public string LogLevel { get; set; } = "Critical"; // "Critical", "Info", "Verbose"
 
     private static string GetSettingsFilePath()
     {

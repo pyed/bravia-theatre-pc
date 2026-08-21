@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Settings - BRAVIA Theatre PC"
-        Width="480" Height="620"
+        Width="480" Height="650"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -139,6 +139,32 @@
                                 <TextBlock Grid.Row="5" Grid.Column="0" Text="Toggle Night Mode" Foreground="#D0D0D0" VerticalAlignment="Center" FontSize="12"/>
                                 <TextBox x:Name="TxtHotkeyNightMode" Grid.Row="5" Grid.Column="1" Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"/>
                             </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Logging & Diagnostics -->
+                    <TextBlock Text="LOGGING &amp; DIAGNOSTICS" Foreground="#4CC2FF" FontSize="11" FontWeight="Bold" Margin="0,0,0,8"/>
+                    <Border Background="#262626" BorderBrush="#333333" BorderThickness="1" CornerRadius="8" Padding="14,12" Margin="0,0,0,16">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,12">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="Logging Level" Foreground="#FFFFFF" FontSize="12.5" FontWeight="Medium"/>
+                                    <TextBlock Text="Critical logs errors only; Verbose logs all streams" Foreground="#888888" FontSize="11" Margin="0,2,0,0"/>
+                                </StackPanel>
+                                <ComboBox x:Name="CboLogLevel" Width="120" Height="26" HorizontalAlignment="Right" Background="#1C1C1C" Foreground="#FFFFFF">
+                                    <ComboBoxItem Content="Critical" Tag="Critical" ToolTip="Only fatal errors and crashes (Default - Minimal)"/>
+                                    <ComboBoxItem Content="Info" Tag="Info" ToolTip="Startup, connection milestones, and errors"/>
+                                    <ComboBoxItem Content="Verbose" Tag="Verbose" ToolTip="Full packet streams and diagnostic details"/>
+                                </ComboBox>
+                            </DockPanel>
+
+                            <DockPanel Margin="0,4,0,0">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="Log File Location" Foreground="#FFFFFF" FontSize="12.5" FontWeight="Medium"/>
+                                    <TextBlock x:Name="TxtLogPath" Text="%APPDATA%\BraviaTheatrePC\bravia_csharp.log" Foreground="#888888" FontSize="10.5" Margin="0,2,0,0" FontFamily="Consolas, Segoe UI"/>
+                                </StackPanel>
+                                <Button Content="Open Folder" HorizontalAlignment="Right" Padding="10,4" Background="#333333" Foreground="#FFFFFF" BorderBrush="#444444" BorderThickness="1" Cursor="Hand" Click="BtnOpenLogFolder_Click"/>
+                            </DockPanel>
                         </StackPanel>
                     </Border>
 
