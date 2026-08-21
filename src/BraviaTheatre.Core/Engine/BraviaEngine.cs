@@ -7,7 +7,6 @@ using BraviaTheatre.Core.Auth;
 using BraviaTheatre.Core.Discovery;
 using BraviaTheatre.Core.Models;
 using BraviaTheatre.Core.Wire;
-using Grpc.Core;
 
 namespace BraviaTheatre.Core.Engine;
 
@@ -32,9 +31,12 @@ public sealed class BraviaEngine : IDisposable
     private readonly int _configuredPort;
     private readonly SonyCredentials _credentials;
     private readonly CancellationTokenSource _cts = new();
+    private readonly Func<string, int, SonyCredentials, IBraviaClient> _clientFactory;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
 
-    private BraviaClient? _client;
     private Task? _workerTask;
+    private int _activeCommandDrainReaders;
+    private int _maxConcurrentCommandDrainReaders;
 
     private readonly Channel<(string path, object value)> _cmdChannel = Channel.CreateUnbounded<(string, object)>(
         new UnboundedChannelOptions
@@ -60,10 +62,27 @@ public sealed class BraviaEngine : IDisposable
     }
 
     public BraviaEngine(SonyCredentials credentials, string? host = null, int port = 55051)
+        : this(
+            credentials,
+            host,
+            port,
+            static (clientHost, clientPort, clientCredentials) => new BraviaClient(clientHost, clientPort, clientCredentials),
+            static (delay, ct) => Task.Delay(delay, ct))
+    {
+    }
+
+    internal BraviaEngine(
+        SonyCredentials credentials,
+        string? host,
+        int port,
+        Func<string, int, SonyCredentials, IBraviaClient> clientFactory,
+        Func<TimeSpan, CancellationToken, Task> delayAsync)
     {
         _credentials = credentials;
         _configuredHost = host;
         _configuredPort = port;
+        _clientFactory = clientFactory;
+        _delayAsync = delayAsync;
     }
 
     private void Log(string msg) => LogAction?.Invoke($"[Engine] {msg}");
@@ -107,19 +126,17 @@ public sealed class BraviaEngine : IDisposable
                 continue;
             }
 
+            IBraviaClient? client = null;
+            using var connectionCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+            var connectionTasks = new List<Task>();
+
             try
             {
                 Log($"Connecting gRPC channel to {host}:{port}...");
-                _client = new BraviaClient(host, port, _credentials)
-                {
-                    LogAction = Log
-                };
-                await _client.InitializeSessionAsync(_cts.Token);
+                client = _clientFactory(host, port, _credentials);
+                client.LogAction = Log;
+                await client.InitializeSessionAsync(connectionCts.Token);
                 Log("Full security handshake completed (ConfirmSignin + ConfirmKeys).");
-
-                // Start notify stream immediately
-                using var notifyStream = _client.StartNotifyStream(_cts.Token);
-                Log("Live notify stream started.");
 
                 // Set initial connected state
                 lock (_stateLock)
@@ -128,77 +145,157 @@ public sealed class BraviaEngine : IDisposable
                     StateChanged?.Invoke(_currentState);
                 }
 
-                // Read notify stream on dedicated background loop
-                var notifyTask = Task.Run(async () =>
-                {
-                    try
-                    {
-                        while (await notifyStream.ResponseStream.MoveNext(_cts.Token))
-                        {
-                            var msgBytes = notifyStream.ResponseStream.Current;
-                            var (path, value) = NotifyParser.ParseNotifyMessage(msgBytes);
+                var notifyTask = NotifyLoopAsync(client, connectionCts.Token);
+                connectionTasks.Add(notifyTask);
+                Log("Live notify stream started.");
 
-                            if (!string.IsNullOrEmpty(path))
-                            {
-                                ApplyDelta(path, value);
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"Notify stream ended: {ex.Message}");
-                    }
-                }, _cts.Token);
-
-                // Fetch initial states in parallel
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        var initialStates = await _client.GetInitialStatesAsync(MonitoredPaths, _cts.Token);
-                        Log($"Snapshot received ({initialStates.Count} paths). Applying state...");
-                        ApplySnapshot(initialStates, deviceName);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"Initial snapshot warning: {ex.Message}");
-                    }
-                }, _cts.Token);
+                var initialSnapshotTask = InitialSnapshotAsync(client, deviceName, connectionCts.Token);
+                connectionTasks.Add(initialSnapshotTask);
 
                 backoffSec = 5; // Reset backoff on successful connect
 
                 // Start command drain loop and keepalive loop
-                var cmdDrainTask = Task.Run(() => CommandDrainLoopAsync(_cts.Token), _cts.Token);
-                _ = Task.Run(() => KeepAlivePollLoopAsync(_cts.Token), _cts.Token);
+                var cmdDrainTask = CommandDrainLoopAsync(client, connectionCts.Token);
+                connectionTasks.Add(cmdDrainTask);
+
+                var keepAliveTask = KeepAlivePollLoopAsync(client, deviceName, connectionCts.Token);
+                connectionTasks.Add(keepAliveTask);
 
                 await Task.WhenAny(notifyTask, cmdDrainTask);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (_cts.Token.IsCancellationRequested)
             {
                 break;
             }
             catch (Exception ex)
             {
                 Log($"Connection/Stream error: {ex.Message}");
-                CurrentState = SoundbarState.Disconnected;
             }
             finally
             {
-                _client?.Dispose();
-                _client = null;
+                connectionCts.Cancel();
+                SetDisconnectedState();
+                await AwaitConnectionTasksAsync(connectionTasks, connectionCts.Token);
+                SetDisconnectedState();
+
+                try
+                {
+                    client?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    Log($"Client dispose warning: {ex.Message}");
+                }
             }
 
             if (!_cts.Token.IsCancellationRequested)
             {
-                await Task.Delay(TimeSpan.FromSeconds(backoffSec), _cts.Token);
+                await _delayAsync(TimeSpan.FromSeconds(backoffSec), _cts.Token);
                 backoffSec = Math.Min(backoffSec * 2, 60);
             }
         }
     }
 
-    private async Task CommandDrainLoopAsync(CancellationToken ct)
+    internal Task Completion => _workerTask ?? Task.CompletedTask;
+    internal int ActiveCommandDrainReaders => Volatile.Read(ref _activeCommandDrainReaders);
+    internal int MaxConcurrentCommandDrainReaders => Volatile.Read(ref _maxConcurrentCommandDrainReaders);
+
+    private async Task NotifyLoopAsync(IBraviaClient client, CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested && _client != null)
+        try
+        {
+            await foreach (var msgBytes in client.ReadNotificationsAsync(ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                var (path, value) = NotifyParser.ParseNotifyMessage(msgBytes);
+
+                if (!string.IsNullOrEmpty(path))
+                {
+                    ApplyDelta(path, value);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Log($"Notify stream ended: {ex.Message}");
+        }
+    }
+
+    private async Task InitialSnapshotAsync(IBraviaClient client, string deviceName, CancellationToken ct)
+    {
+        try
+        {
+            var initialStates = await client.GetInitialStatesAsync(MonitoredPaths, ct);
+            ct.ThrowIfCancellationRequested();
+            Log($"Snapshot received ({initialStates.Count} paths). Applying state...");
+            ApplySnapshot(initialStates, deviceName);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Log($"Initial snapshot warning: {ex.Message}");
+        }
+    }
+
+    private async Task AwaitConnectionTasksAsync(IReadOnlyCollection<Task> tasks, CancellationToken connectionToken)
+    {
+        if (tasks.Count == 0) return;
+
+        try
+        {
+            await Task.WhenAll(tasks);
+        }
+        catch (OperationCanceledException) when (connectionToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Log($"Connection worker cleanup warning: {ex.Message}");
+        }
+    }
+
+    private void SetDisconnectedState()
+    {
+        SoundbarState? disconnectedState = null;
+
+        lock (_stateLock)
+        {
+            if (_currentState != SoundbarState.Disconnected)
+            {
+                _currentState = SoundbarState.Disconnected;
+                disconnectedState = _currentState;
+            }
+        }
+
+        if (disconnectedState != null)
+        {
+            StateChanged?.Invoke(disconnectedState);
+        }
+    }
+
+    private async Task CommandDrainLoopAsync(IBraviaClient client, CancellationToken ct)
+    {
+        var activeReaders = Interlocked.Increment(ref _activeCommandDrainReaders);
+        UpdateMaximum(ref _maxConcurrentCommandDrainReaders, activeReaders);
+
+        try
+        {
+            await CommandDrainCoreAsync(client, ct);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeCommandDrainReaders);
+        }
+    }
+
+    private async Task CommandDrainCoreAsync(IBraviaClient client, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
         {
             try
             {
@@ -218,22 +315,26 @@ public sealed class BraviaEngine : IDisposable
                             }
                         }
 
-                        if (_client == null || ct.IsCancellationRequested) break;
+                        if (ct.IsCancellationRequested) break;
 
                         try
                         {
                             if (value is int intVal)
                             {
-                                await _client.ExecCommandAsync(path, intValue: intVal, ct: ct);
+                                await client.ExecCommandAsync(path, intValue: intVal, ct: ct);
                             }
                             else if (value is bool boolVal)
                             {
-                                await _client.ExecCommandAsync(path, boolValue: boolVal, ct: ct);
+                                await client.ExecCommandAsync(path, boolValue: boolVal, ct: ct);
                             }
                             else if (value is string strVal)
                             {
-                                await _client.ExecCommandAsync(path, stringValue: strVal, ct: ct);
+                                await client.ExecCommandAsync(path, stringValue: strVal, ct: ct);
                             }
+                        }
+                        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                        {
+                            break;
                         }
                         catch (Exception ex)
                         {
@@ -254,17 +355,22 @@ public sealed class BraviaEngine : IDisposable
         }
     }
 
-    private async Task KeepAlivePollLoopAsync(CancellationToken ct)
+    private async Task KeepAlivePollLoopAsync(IBraviaClient client, string deviceName, CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested && _client != null)
+        while (!ct.IsCancellationRequested)
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(25), ct);
-                if (_client == null || ct.IsCancellationRequested) break;
+                await _delayAsync(TimeSpan.FromSeconds(25), ct);
+                ct.ThrowIfCancellationRequested();
 
-                var snapshot = await _client.GetInitialStatesAsync(new[] { "power", "volume", "sound_setting.volume.bass", "sound_setting.voice_mode", "playback_control.function", "playback_control.audio_format" }, ct);
-                ApplySnapshot(snapshot, CurrentState.DeviceName ?? "BRAVIA Theatre");
+                var snapshot = await client.GetInitialStatesAsync(new[] { "power", "volume", "sound_setting.volume.bass", "sound_setting.voice_mode", "playback_control.function", "playback_control.audio_format" }, ct);
+                ct.ThrowIfCancellationRequested();
+                ApplySnapshot(snapshot, deviceName);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
             }
             catch
             {
@@ -273,7 +379,7 @@ public sealed class BraviaEngine : IDisposable
         }
     }
 
-    private void ApplySnapshot(Dictionary<string, object?> snapshot, string deviceName)
+    internal void ApplySnapshot(Dictionary<string, object?> snapshot, string deviceName)
     {
         lock (_stateLock)
         {
@@ -324,30 +430,22 @@ public sealed class BraviaEngine : IDisposable
                     function = fn;
             }
 
-            if (snapshot.TryGetValue("audio_output.stream_info.audio_format", out var cObj) && cObj != null)
+            if (snapshot.TryGetValue("audio_output.stream_info.audio_format", out var cObj))
             {
-                var format = cObj.ToString();
-                if (!string.IsNullOrEmpty(format) && format != "unknown" && format != "none" && format != "NoAudio")
-                    codec = format;
+                codec = NormalizeAudioValue(cObj);
             }
-            else if (snapshot.TryGetValue("playback_control.audio_format", out var pcObj) && pcObj != null)
+            else if (snapshot.TryGetValue("playback_control.audio_format", out var pcObj))
             {
-                var format = pcObj.ToString();
-                if (!string.IsNullOrEmpty(format) && format != "unknown" && format != "none" && format != "NoAudio")
-                    codec = format;
+                codec = NormalizeAudioValue(pcObj);
             }
 
-            if (snapshot.TryGetValue("audio_output.stream_info.channel_info", out var chObj) && chObj != null)
+            if (snapshot.TryGetValue("audio_output.stream_info.channel_info", out var chObj))
             {
-                var ch = chObj.ToString();
-                if (!string.IsNullOrEmpty(ch) && ch != "unknown" && ch != "none")
-                    channel = ch;
+                channel = NormalizeAudioValue(chObj);
             }
-            else if (snapshot.TryGetValue("playback_control.audio_channel", out var pchObj) && pchObj != null)
+            else if (snapshot.TryGetValue("playback_control.audio_channel", out var pchObj))
             {
-                var ch = pchObj.ToString();
-                if (!string.IsNullOrEmpty(ch) && ch != "unknown" && ch != "none")
-                    channel = ch;
+                channel = NormalizeAudioValue(pchObj);
             }
 
             CurrentState = new SoundbarState
@@ -369,15 +467,36 @@ public sealed class BraviaEngine : IDisposable
         }
     }
 
-    private void ApplyDelta(string path, object? value)
+    internal void ApplyDelta(string path, object? value)
     {
-        if (value == null) return;
         lock (_stateLock)
         {
             var cur = _currentState;
             bool updated = false;
 
-            if (path == "volume" && int.TryParse(value.ToString(), out int v))
+            if (path == "playback_control.audio_format" || path == "audio_output.stream_info.audio_format")
+            {
+                var codec = NormalizeAudioValue(value);
+                if (cur.Codec != codec)
+                {
+                    cur = cur with { Codec = codec };
+                    updated = true;
+                }
+            }
+            else if (path == "playback_control.audio_channel" || path == "audio_output.stream_info.channel_info")
+            {
+                var channel = NormalizeAudioValue(value);
+                if (cur.Channel != channel)
+                {
+                    cur = cur with { Channel = channel };
+                    updated = true;
+                }
+            }
+            else if (value == null)
+            {
+                return;
+            }
+            else if (path == "volume" && int.TryParse(value.ToString(), out int v))
             {
                 cur = cur with { Volume = v };
                 updated = true;
@@ -435,30 +554,36 @@ public sealed class BraviaEngine : IDisposable
                     updated = true;
                 }
             }
-            else if (path == "playback_control.audio_format" || path == "audio_output.stream_info.audio_format")
-            {
-                var format = value.ToString();
-                if (!string.IsNullOrEmpty(format) && format != "unknown" && format != "none" && format != "NoAudio")
-                {
-                    cur = cur with { Codec = format };
-                    updated = true;
-                }
-            }
-            else if (path == "playback_control.audio_channel" || path == "audio_output.stream_info.channel_info")
-            {
-                var ch = value.ToString();
-                if (!string.IsNullOrEmpty(ch) && ch != "unknown" && ch != "none")
-                {
-                    cur = cur with { Channel = ch };
-                    updated = true;
-                }
-            }
-
             if (updated)
             {
                 CurrentState = cur;
             }
         }
+    }
+
+    private static void UpdateMaximum(ref int maximum, int candidate)
+    {
+        var current = Volatile.Read(ref maximum);
+        while (candidate > current)
+        {
+            var observed = Interlocked.CompareExchange(ref maximum, candidate, current);
+            if (observed == current) return;
+            current = observed;
+        }
+    }
+
+    private static string? NormalizeAudioValue(object? value)
+    {
+        var text = value?.ToString()?.Trim();
+        if (string.IsNullOrEmpty(text)) return null;
+
+        return text.Equals("NoAudio", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("NoChannel", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("none", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("unknown", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("invalid", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : text;
     }
 
     public Task<bool> SetVolumeAsync(int volume)
@@ -590,12 +715,6 @@ public sealed class BraviaEngine : IDisposable
         try
         {
             _cts.Cancel();
-        }
-        catch { }
-
-        try
-        {
-            _client?.Dispose();
         }
         catch { }
     }

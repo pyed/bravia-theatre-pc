@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <Protobuf Include="Protos\bravia_control.proto" GrpcServices="Client" />
+    <InternalsVisibleTo Include="BraviaTheatre.Tests" />
   </ItemGroup>
 
   <ItemGroup>
