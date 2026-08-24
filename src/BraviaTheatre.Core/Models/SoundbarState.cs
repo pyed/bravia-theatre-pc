@@ -15,6 +15,7 @@ public sealed record SoundbarState
     public string? Codec { get; init; }
     public string? Channel { get; init; }
     public string? Input { get; init; }
+    public bool AuthRequired { get; init; }
     public string? DeviceName { get; init; }
 
     public string CodecBadgeKind => !Connected ? "idle" : Power ? CodecTaxonomy.Classify(Codec) : "standby";
@@ -35,6 +36,7 @@ public sealed record SoundbarState
         Codec = null,
         Channel = null,
         Input = null,
-        DeviceName = "BRAVIA Theatre"
+        DeviceName = "BRAVIA Theatre",
+        AuthRequired = false
     };
 }

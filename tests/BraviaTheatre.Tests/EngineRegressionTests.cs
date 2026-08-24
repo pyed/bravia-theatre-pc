@@ -807,7 +807,7 @@ public class EngineRegressionTests
         }
     }
 
-    private sealed class FakeBraviaClient : IBraviaClient
+    internal sealed class FakeBraviaClient : IBraviaClient
     {
         public Action<string>? LogAction { get; set; }
         public Action? OnDispose { get; set; }
@@ -823,9 +823,16 @@ public class EngineRegressionTests
         public TaskCompletionSource<bool> NotificationsStopped { get; } = NewSignal();
         public TaskCompletionSource<bool> Disposed { get; } = NewSignal();
 
+        /// <summary>When set, InitializeSessionAsync throws this instead of succeeding.</summary>
+        public Exception? InitFailure { get; set; }
+
         public Task InitializeSessionAsync(CancellationToken ct = default)
         {
             ct.ThrowIfCancellationRequested();
+
+            if (InitFailure is not null)
+                throw InitFailure;
+
             Initialized.TrySetResult(true);
             return Task.CompletedTask;
         }

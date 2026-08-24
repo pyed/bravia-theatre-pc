@@ -209,12 +209,14 @@ public partial class App : Application
         Log("Credentials loaded successfully.");
 
         // Initialize System Tray
-        InitializeTray();
+        var trayIconShown = InitializeTray();
         ReplaceEngine(_credentials);
         _startupCompleted = true;
+        if (trayIconShown)
+            Dispatcher.BeginInvoke(new Action(ShowTrayIconGuidanceOnce));
     }
 
-    private void InitializeTray()
+    private bool InitializeTray()
     {
         Log("Initializing Native System Tray Icon...");
         _trayIcon = new NativeTrayIcon
@@ -259,10 +261,35 @@ public partial class App : Application
         menu.Items.Add(exitItem);
 
         _trayIcon.ContextMenu = menu;
-        if (_trayIcon.Show(IconHelper.GetTrayIcon("idle"), "BRAVIA Theatre PC"))
+        var shown = _trayIcon.Show(IconHelper.GetTrayIcon("idle"), "BRAVIA Theatre PC");
+        if (shown)
             Log("Native System Tray Icon shown.");
         else
             Log("Native System Tray Icon failed to initialize.");
+        return shown;
+    }
+
+    private void ShowTrayIconGuidanceOnce()
+    {
+        if (_isShuttingDown || _settings.TrayIconGuidanceShown) return;
+
+        _settings.TrayIconGuidanceShown = true;
+        if (!_settings.TrySave(out var saveError))
+            Log(saveError ?? "Could not save the tray icon guidance preference.", AppLogLevel.Info);
+
+        var result = MessageBox.Show(
+            "Windows controls which app icons remain visible next to the clock. To keep BRAVIA Theatre PC visible, enable it under Other system tray icons, or drag it out of the hidden-icons menu.\n\nOpen Taskbar settings now?",
+            "Keep BRAVIA Theatre PC Visible",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information,
+            MessageBoxResult.Yes);
+
+        if (result == MessageBoxResult.Yes &&
+            !TaskbarSettingsService.TryOpenTaskbarSettings(out var error))
+        {
+            MessageBox.Show(error ?? "Windows Taskbar settings could not be opened.",
+                "Could Not Open Taskbar Settings", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void OpenSettingsWindow()

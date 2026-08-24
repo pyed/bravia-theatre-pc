@@ -7,6 +7,7 @@ namespace BraviaTheatre.UI.Models;
 public sealed class AppSettings
 {
     public bool StartWithWindows { get; set; }
+    public bool TrayIconGuidanceShown { get; set; }
     public bool ShowRearSpeaker { get; set; }
     public bool EnableGlobalHotkeys { get; set; } = true;
 
@@ -24,6 +25,8 @@ public sealed class AppSettings
     public static string SettingsFilePath => Path.Combine(App.GetAppDataDir(), "settings.json");
 
     public static AppSettings Load() => Load(out _);
+
+    public AppSettings Copy() => (AppSettings)MemberwiseClone();
 
     public static AppSettings Load(out string? warning)
     {

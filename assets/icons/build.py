@@ -1,9 +1,9 @@
 """Build authentic, Sony-app matching tray and UI icons for bravia-tray.
 
 Based on official brand assets and Sony Connect app UI:
-- Dolby Suite (Atmos, Atmos TrueHD, TrueHD, DD+, DD): Official [D D] Dolby ATMOS on light card tile
+- Dolby Atmos uses the Atmos tile; non-Atmos Dolby formats use Dolby Audio or TrueHD tiles
 - DTS Suite (DTS:X, DTS-HD, DTS): Exact authentic horizontal marks from Sony app on sleek dark graphite
-- LPCM / 360RA / AAC / BRAVIA: High-contrast, clean typography badges
+- LPCM / 360RA / AAC / DSD / BRAVIA: High-contrast, clean typography badges
 
 Outputs:
   assets/icons/<kind>.png   (256x256 master, RGBA)
@@ -89,22 +89,25 @@ def main() -> None:
     CYAN_IMAX    = (0, 98, 184, 255)     # IMAX Blue #0062B8
     TEAL_360     = (0, 131, 143, 255)    # Sony 360RA Teal #00838F
     CHARCOAL_AAC = (55, 71, 79, 255)     # AAC Charcoal Blue #37474F
+    VIOLET_DSD    = (72, 61, 111, 255)    # Distinct DSD violet #483D6F
     MATTE_IDLE   = (24, 24, 24, 255)     # Idle Black #181818
 
     # Load source marks
-    dolby_master = Image.open(os.path.join(RAW, "_sony_atmos_tile.png")).convert("RGBA") if os.path.exists(os.path.join(RAW, "_sony_atmos_tile.png")) else Image.open(os.path.join(HERE, "atmos.png")).convert("RGBA")
+    dolby_atmos = Image.open(os.path.join(RAW, "_sony_atmos_tile.png")).convert("RGBA")
+    dolby_audio = Image.open(os.path.join(RAW, "_sony_dolby_audio_tile.png")).convert("RGBA")
+    dolby_truehd = Image.open(os.path.join(RAW, "_sony_truehd_tile.png")).convert("RGBA")
     sony_dtsx  = Image.open(os.path.join(RAW, "_sony_dtsx.png"))
     sony_dtshd = Image.open(os.path.join(RAW, "_sony_dtshd.png"))
     imax_raw   = Image.open(os.path.join(RAW, "imax.png"))
 
     badges: dict[str, Image.Image] = {}
 
-    # 1. Dolby Family (Atmos, Atmos TrueHD, TrueHD, DD+, DD)
-    badges["atmos"] = dolby_master
-    badges["atmos_truehd"] = dolby_master
-    badges["truehd"] = dolby_master
-    badges["ddplus"] = dolby_master
-    badges["dd"] = dolby_master
+    # 1. Dolby family. Sony presents DD/DD+ as Dolby Audio, not Dolby Atmos.
+    badges["atmos"] = dolby_atmos
+    badges["atmos_truehd"] = dolby_atmos
+    badges["truehd"] = dolby_truehd
+    badges["ddplus"] = dolby_audio
+    badges["dd"] = dolby_audio
 
     # 2. dtsx (DTS:X from Sony app): Exact horizontal mark in white on dark graphite
     t_dtsx = _rounded_tile(MASTER, DARK_DTS)
@@ -148,7 +151,16 @@ def main() -> None:
     d.text((MASTER // 2 - tw // 2 - bb[0], MASTER // 2 - th // 2 - bb[1]), "AAC", font=f, fill=(255, 255, 255, 255))
     badges["aac"] = t_aac
 
-    # 8. 360ra
+    # 8. dsd
+    t_dsd = _rounded_tile(MASTER, VIOLET_DSD)
+    d = ImageDraw.Draw(t_dsd)
+    f = _fit_font("DSD", int(MASTER * 0.84), 64, min_size=18)
+    bb = f.getbbox("DSD")
+    tw, th = bb[2] - bb[0], bb[3] - bb[1]
+    d.text((MASTER // 2 - tw // 2 - bb[0], MASTER // 2 - th // 2 - bb[1]), "DSD", font=f, fill=(255, 255, 255, 255))
+    badges["dsd"] = t_dsd
+
+    # 9. 360ra
     t_360 = _rounded_tile(MASTER, TEAL_360)
     d = ImageDraw.Draw(t_360)
     f = _fit_font("360RA", int(MASTER * 0.84), 58, min_size=18)
@@ -157,7 +169,7 @@ def main() -> None:
     d.text((MASTER // 2 - tw // 2 - bb[0], MASTER // 2 - th // 2 - bb[1]), "360RA", font=f, fill=(255, 255, 255, 255))
     badges["360ra"] = t_360
 
-    # 9. idle
+    # 10. idle
     t_idle = _rounded_tile(MASTER, MATTE_IDLE)
     d = ImageDraw.Draw(t_idle)
     f = _fit_font("BRAVIA", int(MASTER * 0.84), 48, min_size=18)
@@ -174,9 +186,6 @@ def main() -> None:
             lpcm_out = os.path.join(HERE, "lpcm.png")
             img.save(lpcm_out)
             print("wrote", lpcm_out, img.size)
-
-    # Save Dolby master reference to raw for reproducibility
-    dolby_master.save(os.path.join(RAW, "_sony_atmos_tile.png"))
 
     # Contact sheet preview
     sizes = [128, 64, 32, 24, 16]

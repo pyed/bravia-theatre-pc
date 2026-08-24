@@ -7,6 +7,7 @@ using BraviaTheatre.Core.Auth;
 using BraviaTheatre.Core.Discovery;
 using BraviaTheatre.Core.Models;
 using BraviaTheatre.Core.Wire;
+using Grpc.Core;
 
 namespace BraviaTheatre.Core.Engine;
 
@@ -133,6 +134,10 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
     {
         int backoffSec = 5;
 
+        // Sticky across retry attempts once a handshake proves auth is required;
+        // cleared only by a successful authenticated handshake.
+        bool authRequired = false;
+
         while (!_cts.Token.IsCancellationRequested)
         {
             string host = _configuredHost ?? string.Empty;
@@ -174,7 +179,23 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 Log($"Connecting gRPC channel to {host}:{port}...");
                 client = _clientFactory(host, port, _credentials);
                 client.LogAction = Log;
-                await client.InitializeSessionAsync(connectionCts.Token);
+
+                try
+                {
+                    await client.InitializeSessionAsync(connectionCts.Token);
+                    authRequired = false;
+                }
+                catch (RpcException ex) when (ex.StatusCode == StatusCode.InvalidArgument)
+                {
+                    if (_credentials.IsValid)
+                    {
+                        authRequired = true;
+                        Log($"Authentication required: {ex.Message}");
+                    }
+
+                    throw;
+                }
+
                 Log("Full security handshake completed (ConfirmSignin + ConfirmKeys).");
 
                 ActivateConnection(connectionGeneration, deviceName);
@@ -221,7 +242,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     Log($"Connection cancellation warning: {ex.Message}");
                 }
 
-                SetDisconnectedState(connectionGeneration);
+                SetDisconnectedState(connectionGeneration, authRequired);
 
                 try
                 {
@@ -352,7 +373,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             _fieldRevisions.Clear();
             _stateRevision++;
 
-            var next = _currentState with { Connected = true, DeviceName = deviceName };
+            var next = _currentState with { Connected = true, DeviceName = deviceName, AuthRequired = false };
             if (next != _currentState)
             {
                 _currentState = next;
@@ -366,22 +387,28 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         }
     }
 
-    private void SetDisconnectedState(long? connectionGeneration = null)
+    private void SetDisconnectedState(long? connectionGeneration = null, bool authRequired = false)
     {
         SoundbarState? disconnectedState = null;
 
         lock (_stateLock)
         {
-            if (connectionGeneration.HasValue && _activeConnectionGeneration != connectionGeneration.Value)
+            // Never clobber a state owned by a different, still-active connection,
+            // but a connection that never activated (e.g. handshake rejected)
+            // must still be able to publish the auth-required flag.
+            if (connectionGeneration.HasValue
+                && _activeConnectionGeneration != 0
+                && _activeConnectionGeneration != connectionGeneration.Value)
                 return;
 
             _activeConnectionGeneration = 0;
             _fieldRevisions.Clear();
             _stateRevision++;
 
-            if (_currentState != SoundbarState.Disconnected)
+            var disconnected = SoundbarState.Disconnected with { AuthRequired = authRequired };
+            if (_currentState != disconnected)
             {
-                _currentState = SoundbarState.Disconnected;
+                _currentState = disconnected;
                 disconnectedState = _currentState;
             }
         }

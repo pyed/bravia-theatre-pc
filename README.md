@@ -14,14 +14,14 @@ Built with C# and .NET 10, the application communicates directly with the device
 
 ## Features
 
-- Live codec and channel display, with badges for Dolby Atmos, Dolby Audio, DTS/DTS:X, IMAX Enhanced, LPCM/PCM, AAC, and Sony 360 Reality Audio.
+- Live codec and channel display, with distinct badges for Dolby Atmos, Dolby Audio, Dolby TrueHD, DTS/DTS:X, IMAX Enhanced, LPCM/PCM, AAC, DSD, and Sony 360 Reality Audio.
 - A compact Windows quick-controls flyout for volume, mute, input, bass, optional rear-speaker level, sound field, night mode, voice mode, and power.
 - Configurable global shortcuts, registered atomically so a conflicting shortcut cannot leave a partial hotkey setup.
 - Embedded Sony OAuth sign-in with PKCE and callback-state verification, a manual browser fallback, and explicit device selection when an account contains multiple compatible devices.
 - Windows user-scoped credential protection using DPAPI. Sony cloud access and refresh tokens are not persisted.
 - Automatic local discovery using mDNS first, followed by a bounded subnet probe that fingerprints candidates before connecting.
 - Connection-scoped workers, health polling, command coalescing, stale-command rejection, and clean reconnect/teardown behavior.
-- Native Win32 tray integration with Explorer restart recovery, multi-monitor flyout placement, and single-instance activation.
+- Native Win32 tray integration with Explorer restart recovery, a supported Taskbar Settings shortcut and one-time visibility guidance, multi-monitor flyout placement, and single-instance activation.
 - Atomic settings storage, Windows startup integration, configurable logging, and optional static host/port override.
 
 Default shortcuts are:
@@ -58,6 +58,8 @@ Download the appropriate executable from [GitHub Releases](../../releases):
 - `BraviaTheatrePC-FrameworkDependent.exe` requires the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 Run the executable and complete Sony sign-in when prompted.
+
+Keep the executable at a stable path so Windows can retain your tray-icon placement choice across updates. The first launch offers to open **Taskbar settings**, where you can enable BRAVIA Theatre PC under **Other system tray icons** or drag it from the hidden-icons menu next to the clock.
 
 ### Run from source
 
@@ -98,6 +100,7 @@ Use **Sony Account Setup** from the tray menu or **Re-authenticate** in Settings
 Settings are stored atomically under `%LOCALAPPDATA%\BraviaTheatrePC\settings.json`. Use the Settings window to configure:
 
 - Windows startup
+- A shortcut to Windows Taskbar settings for keeping the tray icon visible
 - Optional rear-speaker controls
 - Global shortcuts
 - Automatic discovery or a static host/port override
@@ -122,7 +125,7 @@ dotnet build BraviaTheatrePC.sln -c Release --no-restore -warnaserror
 dotnet test BraviaTheatrePC.sln -c Release --no-build --no-restore
 ```
 
-The tests cover bounded wire decoding, schema-aware state parsing, client session sequencing, discovery parsing and cancellation, OAuth validation, credential serialization, codec taxonomy, connection teardown, reconnect isolation, stale commands, and snapshot/delta ordering.
+The tests cover bounded wire decoding, schema-aware state parsing, client session sequencing, discovery parsing and cancellation, OAuth validation, credential serialization, exhaustive codec taxonomy and packaged badge resources, taskbar-settings guidance, connection teardown, reconnect isolation, stale commands, and snapshot/delta ordering.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes. Test vectors must be synthetic; real session IDs, HMAC keys, OAuth tokens, device identifiers, and packet captures are prohibited.
 

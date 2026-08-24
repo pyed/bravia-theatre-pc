@@ -8,16 +8,18 @@
 #   atmos.png         -> Dolby Atmos family (dolby_atmos_mat, dolby_atmos_digital_plus)
 #   atmos_truehd.png  -> Dolby Atmos TrueHD (dolby_atmos_truehd)
 #   truehd.png        -> Dolby TrueHD (dolby_digital_truehd)
-#   ddplus.png        -> Dolby Digital Plus & Dolby MAT (dolby_digital_plus, dolby_mat)
-#   dd.png            -> Dolby Digital (dolby_digital)
-#   dtsx.png          -> DTS:X family (dts_x, dts_x_master_audio, imax_dts_x)
+#   ddplus.png        -> Dolby Audio for DD+ & Dolby MAT (dolby_digital_plus, dolby_mat)
+#   dd.png            -> Dolby Audio for Dolby Digital (dolby_digital)
+#   dtsx.png          -> DTS:X family (dts_x, dts_x_master_audio)
 #   dtshd.png         -> DTS-HD family (dts_hd_master_audio, dts_hd_high_resolution)
 #   dts.png           -> Standard DTS family (dts, dts_es_*, dts_96_24, dts_express)
-#   imax.png          -> IMAX Enhanced DTS (imax_dts)
+#   imax.png          -> IMAX Enhanced DTS (dts_x_imax, imax_dts_x, imax_dts)
 #   pcm.png / lpcm.png-> Uncompressed LPCM / Multichannel PCM
 #   aac.png           -> MPEG-2 / MPEG-4 AAC
+#   dsd.png           -> Direct Stream Digital
 #   360ra.png         -> Sony 360 Reality Audio
 #   idle.png          -> Standby / Unknown / Inactive
 #
 # Recommended source size: 256x256 RGBA PNG.
 # Run `python3 build.py` from this folder to regenerate all master assets from raw/.
+# These top-level PNGs are linked directly into the WPF application as its runtime resources.

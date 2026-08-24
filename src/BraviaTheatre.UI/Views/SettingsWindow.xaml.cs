@@ -119,6 +119,15 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void BtnOpenTaskbarSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TaskbarSettingsService.TryOpenTaskbarSettings(out var error))
+        {
+            MessageBox.Show(this, error ?? "Windows Taskbar settings could not be opened.",
+                "Could Not Open Taskbar Settings", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void BtnSave_Click(object sender, RoutedEventArgs e)
     {
         if (!int.TryParse(TxtStaticPort.Text.Trim(), out var port) || port is < 1 or > 65535)
@@ -129,21 +138,18 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        var updated = new AppSettings
-        {
-            StartWithWindows = ChkStartWithWindows.IsChecked ?? false,
-            ShowRearSpeaker = ChkShowRearSpeaker.IsChecked ?? false,
-            EnableGlobalHotkeys = ChkEnableGlobalHotkeys.IsChecked ?? true,
-            HotkeyVolumeUp = TxtHotkeyVolUp.Text.Trim(),
-            HotkeyVolumeDown = TxtHotkeyVolDown.Text.Trim(),
-            HotkeyMute = TxtHotkeyMute.Text.Trim(),
-            HotkeySoundField = TxtHotkeySoundField.Text.Trim(),
-            HotkeyVoiceMode = TxtHotkeyVoiceMode.Text.Trim(),
-            HotkeyNightMode = TxtHotkeyNightMode.Text.Trim(),
-            StaticHost = TxtStaticHost.Text.Trim(),
-            StaticPort = port,
-            LogLevel = _settings.LogLevel
-        };
+        var updated = _settings.Copy();
+        updated.StartWithWindows = ChkStartWithWindows.IsChecked ?? false;
+        updated.ShowRearSpeaker = ChkShowRearSpeaker.IsChecked ?? false;
+        updated.EnableGlobalHotkeys = ChkEnableGlobalHotkeys.IsChecked ?? true;
+        updated.HotkeyVolumeUp = TxtHotkeyVolUp.Text.Trim();
+        updated.HotkeyVolumeDown = TxtHotkeyVolDown.Text.Trim();
+        updated.HotkeyMute = TxtHotkeyMute.Text.Trim();
+        updated.HotkeySoundField = TxtHotkeySoundField.Text.Trim();
+        updated.HotkeyVoiceMode = TxtHotkeyVoiceMode.Text.Trim();
+        updated.HotkeyNightMode = TxtHotkeyNightMode.Text.Trim();
+        updated.StaticHost = TxtStaticHost.Text.Trim();
+        updated.StaticPort = port;
 
         if (CboLogLevel.SelectedItem is ComboBoxItem selectedItem && selectedItem.Tag != null)
         {

@@ -98,6 +98,18 @@
                             <CheckBox x:Name="ChkShowRearSpeaker" Content="Show Rear Speaker Level control (for SA-RS3S / SA-RS5)" Foreground="#D0D0D0" FontSize="12.5" Margin="0,8,0,4"/>
 
                             <Separator Margin="0,10,0,8"/>
+                            <DockPanel LastChildFill="True">
+                                <Button DockPanel.Dock="Right" Content="Open Taskbar Settings" Padding="10,5"
+                                        Background="#333333" Foreground="#4CC2FF" BorderBrush="#444444"
+                                        BorderThickness="1" Cursor="Hand" Click="BtnOpenTaskbarSettings_Click"/>
+                                <StackPanel Margin="0,0,12,0">
+                                    <TextBlock Text="Keep tray icon visible" Foreground="#FFFFFF" FontWeight="Medium" FontSize="12.5"/>
+                                    <TextBlock Text="Windows controls placement. Enable BRAVIA Theatre PC under Other system tray icons."
+                                               Foreground="#A8A8A8" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <Separator Margin="0,10,0,8"/>
                             <TextBlock Text="Connection override" Foreground="#FFFFFF" FontWeight="Medium" FontSize="12.5"/>
                             <TextBlock Text="Leave host empty for automatic discovery. Changes reconnect the controller."
                                        Foreground="#A8A8A8" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,8"/>
