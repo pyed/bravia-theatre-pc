@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Resources;
-using System.Runtime.CompilerServices;
 using BraviaTheatre.UI.Services;
 using Xunit;
 
@@ -71,6 +70,17 @@ public class IconAssetTests
     private static byte[] ReadIcon(string directory, string name) =>
         File.ReadAllBytes(Path.Combine(directory, $"{name}.png"));
 
-    private static string GetRepositoryRoot([CallerFilePath] string sourceFile = "") =>
-        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourceFile)!, "..", ".."));
+    private static string GetRepositoryRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "BraviaTheatrePC.sln")))
+                return directory.FullName;
+        }
+
+        throw new DirectoryNotFoundException(
+            $"Could not locate the repository root above {AppContext.BaseDirectory}.");
+    }
 }
