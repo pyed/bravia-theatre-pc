@@ -1,11 +1,16 @@
 using System;
 using System.ComponentModel;
-using System.Threading.Tasks;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using BraviaTheatre.Core.Engine;
 using BraviaTheatre.Core.Models;
 using BraviaTheatre.UI.Models;
@@ -15,22 +20,84 @@ namespace BraviaTheatre.UI.Views;
 
 public partial class FlyoutWindow : Window
 {
+    private const uint MonitorDefaultToNearest = 0x00000002;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+
     private readonly BraviaEngine _engine;
-    private AppSettings _settings;
     private readonly Action _onOpenSettings;
+    private readonly FlyoutTransitionController _presentation = new();
+    private AppSettings _settings;
+    private DispatcherTimer? _animationTimer;
+    private PixelRect? _trayAnchor;
+    private FlyoutPlacement _placement;
+    private PixelPoint? _lastDeactivationCursor;
+    private uint _lastDeactivationMessageTime;
+    private bool _inputMenuOpen;
+    private bool _deactivatedWhileInputMenuOpen;
+    private bool _openSettingsAfterClose;
     private bool _isUpdatingUi;
     private bool _isDraggingSlider;
     private bool _allowClose;
 
-    private static readonly SolidColorBrush GreenBrush = new((Color)ColorConverter.ConvertFromString("#44D644"));
-    private static readonly SolidColorBrush BlueBrush = new((Color)ColorConverter.ConvertFromString("#4CC2FF"));
-    private static readonly SolidColorBrush GrayBrush = new((Color)ColorConverter.ConvertFromString("#888888"));
-    private static readonly SolidColorBrush LightGrayBrush = new((Color)ColorConverter.ConvertFromString("#D0D0D0"));
-    private static readonly SolidColorBrush RedBrush = new((Color)ColorConverter.ConvertFromString("#E81123"));
+    private static readonly Geometry SpeakerUnmutedGeometry = Geometry.Parse(
+        "M2,8v8h4l6,5V3L6,8H2z M16.5,8c.9,1.1 1.5,2.5 1.5,4s-.6,2.9-1.5,4l-1.5-1.5c.6-.7 1-1.6 1-2.5s-.4-1.8-1-2.5L16.5,8z M19,5.5c1.9,1.7 3,4 3,6.5s-1.1,4.8-3,6.5l-1.5-1.5c1.5-1.3 2.5-3.1 2.5-5s-1-3.7-2.5-5L19,5.5z");
+    private static readonly Geometry SpeakerMutedGeometry = Geometry.Parse(
+        "M2,8v8h4l6,5V3L6,8H2z M15.4,9.4L18,12l-2.6,2.6 1.4,1.4 2.6-2.6 2.6,2.6 1.4-1.4L20.8,12l2.6-2.6-1.4-1.4-2.6,2.6-2.6-2.6-1.4,1.4z");
 
-    // Centered 24x24 SVG geometries with exact alignment
-    private static readonly Geometry SpeakerUnmutedGeometry = Geometry.Parse("M2,8v8h4l6,5V3L6,8H2z M16.5,8c.9,1.1 1.5,2.5 1.5,4s-.6,2.9-1.5,4l-1.5-1.5c.6-.7 1-1.6 1-2.5s-.4-1.8-1-2.5L16.5,8z M19,5.5c1.9,1.7 3,4 3,6.5s-1.1,4.8-3,6.5l-1.5-1.5c1.5-1.3 2.5-3.1 2.5-5s-1-3.7-2.5-5L19,5.5z");
-    private static readonly Geometry SpeakerMutedGeometry = Geometry.Parse("M2,8v8h4l6,5V3L6,8H2z M15.4,9.4L18,12l-2.6,2.6 1.4,1.4 2.6-2.6 2.6,2.6 1.4-1.4L20.8,12l2.6-2.6-1.4-1.4-2.6,2.6-2.6-2.6-1.4,1.4z");
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out PointNative point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromPoint(PointNative point, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo monitorInfo);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out RectNative rect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        IntPtr hwnd,
+        IntPtr insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern int GetMessageTime();
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PointNative
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RectNative
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private struct MonitorInfo
+    {
+        public int Size;
+        public RectNative Monitor;
+        public RectNative WorkArea;
+        public uint Flags;
+    }
 
     public FlyoutWindow(BraviaEngine engine, AppSettings settings, Action onOpenSettings)
     {
@@ -39,15 +106,16 @@ public partial class FlyoutWindow : Window
         _settings = settings;
         _onOpenSettings = onOpenSettings;
 
-        Deactivated += (s, e) => Hide();
-        Loaded += (s, e) =>
+        WindowBackdropService.Attach(this, WindowBackdropKind.TransientWindow);
+        Deactivated += OnDeactivated;
+        Loaded += (_, _) =>
         {
             ApplySettings(_settings);
             UpdateState(_engine.CurrentState);
         };
 
-        SliderVolume.PreviewMouseDown += (s, e) => _isDraggingSlider = true;
-        SliderVolume.PreviewMouseUp += (s, e) => _isDraggingSlider = false;
+        SliderVolume.PreviewMouseDown += (_, _) => _isDraggingSlider = true;
+        SliderVolume.PreviewMouseUp += (_, _) => _isDraggingSlider = false;
     }
 
     public void ApplySettings(AppSettings settings)
@@ -55,52 +123,74 @@ public partial class FlyoutWindow : Window
         _settings = settings;
         PanelRearSpeaker.Visibility = _settings.ShowRearSpeaker ? Visibility.Visible : Visibility.Collapsed;
         if (IsVisible)
-        {
-            PositionNearTray();
-        }
+            Dispatcher.BeginInvoke(RepositionIfVisible, DispatcherPriority.Loaded);
     }
 
     public void ToggleFlyout()
     {
-        if (IsVisible)
-        {
-            Hide();
-        }
+        var transition = _presentation.ToggleFromTray(sameDeactivationInteraction: false);
+        if (!transition.Exists) return;
+        if (transition.Target == FlyoutPresentationState.Opening)
+            BeginOpen(transition, null);
         else
-        {
-            PositionNearTray();
-            Opacity = 0;
-            FlyoutTransform.Y = 12;
-            Show();
-            Activate();
-
-            var fadeIn = new System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, TimeSpan.FromMilliseconds(120))
-            {
-                EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
-            };
-            var slideUp = new System.Windows.Media.Animation.DoubleAnimation(12.0, 0.0, TimeSpan.FromMilliseconds(120))
-            {
-                EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
-            };
-
-            BeginAnimation(OpacityProperty, fadeIn);
-            FlyoutTransform.BeginAnimation(TranslateTransform.YProperty, slideUp);
-        }
+            BeginClose(transition);
     }
 
-    public void ShowFlyout()
+    internal void ToggleFromTray(TrayActivation activation, PixelRect? trayAnchor)
     {
-        if (IsVisible)
+        var sameDeactivationInteraction = TrayInteractionCorrelator.IsSameInteraction(
+            activation,
+            _lastDeactivationMessageTime,
+            _lastDeactivationCursor,
+            trayAnchor,
+            _presentation.IsAwaitingCorrelatedTrayToggle);
+        var transition = _presentation.ToggleFromTray(sameDeactivationInteraction);
+        if (!transition.Exists) return;
+
+        if (transition.Target == FlyoutPresentationState.Opening)
+            BeginOpen(transition, trayAnchor);
+        else
+            BeginClose(transition);
+    }
+
+    public void ShowFlyout() => ShowFlyout(null);
+
+    internal void ShowFlyout(PixelRect? trayAnchor)
+    {
+        _trayAnchor = trayAnchor ?? _trayAnchor;
+        var transition = _presentation.Show();
+        if (!transition.Exists)
         {
+            if (_presentation.State == FlyoutPresentationState.Open)
+                RepositionIfVisible(trayAnchor);
             Activate();
             return;
         }
-        ToggleFlyout();
+
+        BeginOpen(transition, trayAnchor);
     }
+
+    public void RepositionIfVisible() => RepositionIfVisible(null);
+
+    internal void RepositionIfVisible(PixelRect? trayAnchor)
+    {
+        _trayAnchor = trayAnchor ?? _trayAnchor;
+        if (!IsVisible || _presentation.State != FlyoutPresentationState.Open)
+            return;
+
+        _placement = ResolvePlacement(_trayAnchor);
+        SetWindowPosition(_placement.Bounds.Left, _placement.Bounds.Top);
+    }
+
+    public void PositionNearTray() => RepositionIfVisible();
+
+    internal void ResolveTrayInteraction() => _presentation.ResolveTrayInteraction();
 
     public void CloseForShutdown()
     {
         _allowClose = true;
+        _openSettingsAfterClose = false;
+        StopAnimation();
         Close();
     }
 
@@ -109,7 +199,7 @@ public partial class FlyoutWindow : Window
         if (!_allowClose)
         {
             e.Cancel = true;
-            Hide();
+            RequestClose(causedByDeactivation: false);
         }
         base.OnClosing(e);
     }
@@ -117,107 +207,49 @@ public partial class FlyoutWindow : Window
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        if (e.Handled) return;
 
         if (e.Key == Key.Escape)
         {
-            Hide();
+            RequestClose(causedByDeactivation: false);
             e.Handled = true;
         }
         else if (e.Key is Key.Up or Key.Add or Key.VolumeUp)
         {
-            int newVol = Math.Clamp(_engine.CurrentState.Volume + 1, 0, 100);
-            _ = _engine.SetVolumeAsync(newVol);
+            if (!SliderVolume.IsEnabled) return;
+            SliderVolume.Value = Math.Clamp(Math.Round(SliderVolume.Value) + 1, 0, 100);
             e.Handled = true;
         }
         else if (e.Key is Key.Down or Key.Subtract or Key.VolumeDown)
         {
-            int newVol = Math.Clamp(_engine.CurrentState.Volume - 1, 0, 100);
-            _ = _engine.SetVolumeAsync(newVol);
+            if (!SliderVolume.IsEnabled) return;
+            SliderVolume.Value = Math.Clamp(Math.Round(SliderVolume.Value) - 1, 0, 100);
             e.Handled = true;
         }
         else if (e.Key is Key.M or Key.VolumeMute)
         {
+            if (!BtnSliderMute.IsEnabled) return;
             _ = _engine.ToggleMuteAsync();
             e.Handled = true;
         }
         else if (e.Key == Key.N)
         {
+            if (!BtnNightMode.IsEnabled) return;
             _ = _engine.ToggleNightModeAsync();
             e.Handled = true;
         }
         else if (e.Key == Key.S)
         {
+            if (!BtnSoundField.IsEnabled) return;
             _ = _engine.ToggleSoundFieldAsync();
             e.Handled = true;
         }
         else if (e.Key == Key.V)
         {
+            if (!BtnVoiceMode.IsEnabled) return;
             _ = _engine.ToggleVoiceModeAsync();
             e.Handled = true;
         }
-    }
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern bool GetCursorPos(out POINT lpPoint);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
-    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
-
-    private const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
-
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
-    private struct POINT { public int X; public int Y; }
-
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Auto)]
-    private struct MONITORINFO
-    {
-        public int cbSize;
-        public RECT rcMonitor;
-        public RECT rcWork;
-        public uint dwFlags;
-    }
-
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
-    private struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
-
-    public void PositionNearTray()
-    {
-        UpdateLayout();
-        double w = ActualWidth > 0 ? ActualWidth : Width;
-        double h = ActualHeight > 0 ? ActualHeight : 410;
-
-        try
-        {
-            if (GetCursorPos(out var cursorPt))
-            {
-                var hMon = MonitorFromPoint(cursorPt, MONITOR_DEFAULTTONEAREST);
-                var mi = new MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFO>() };
-                if (GetMonitorInfo(hMon, ref mi))
-                {
-                    var dpi = VisualTreeHelper.GetDpi(this);
-                    double dpiX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
-                    double dpiY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
-
-                    double workLeft = mi.rcWork.Left / dpiX;
-                    double workRight = mi.rcWork.Right / dpiX;
-                    double workTop = mi.rcWork.Top / dpiY;
-                    double workBottom = mi.rcWork.Bottom / dpiY;
-
-                    Left = Math.Max(workLeft + 10, workRight - w - 10);
-                    Top = Math.Max(workTop + 10, workBottom - h - 10);
-                    return;
-                }
-            }
-        }
-        catch { }
-
-        // Fallback to primary work area
-        var workArea = SystemParameters.WorkArea;
-        Left = workArea.Right - w - 10;
-        Top = workArea.Bottom - h - 10;
     }
 
     public void UpdateState(SoundbarState state)
@@ -231,43 +263,35 @@ public partial class FlyoutWindow : Window
         _isUpdatingUi = true;
         try
         {
-            TxtDeviceName.Text = state.DeviceName ?? "BRAVIA Theatre Bar 9";
+            TxtDeviceName.Text = state.DeviceName ?? "BRAVIA Theatre";
 
-            // Glowing Power Button in header
-            if (state.Connected)
+            if (!state.Connected)
             {
-                if (state.Power)
-                {
-                    IconPower.Fill = GreenBrush;
-                    PowerShadow.Color = (Color)ColorConverter.ConvertFromString("#44D644");
-                    PowerShadow.Opacity = 0.85;
-                    BtnHeaderPower.ToolTip = "Power: Online (Click for Standby)";
-                }
-                else
-                {
-                    IconPower.Fill = GrayBrush;
-                    PowerShadow.Opacity = 0;
-                    BtnHeaderPower.ToolTip = "Power: Standby (Click to Turn On)";
-                }
+                SetBrushResource(IconPower, Shape.FillProperty, "SystemFillColorCriticalBrush");
+                BtnHeaderPower.ToolTip = "Connecting / Offline";
+            }
+            else if (state.Power)
+            {
+                SetBrushResource(IconPower, Shape.FillProperty, "SystemFillColorSuccessBrush");
+                BtnHeaderPower.ToolTip = "Power: On (click for standby)";
             }
             else
             {
-                IconPower.Fill = RedBrush;
-                PowerShadow.Color = (Color)ColorConverter.ConvertFromString("#E81123");
-                PowerShadow.Opacity = 0.85;
-                BtnHeaderPower.ToolTip = "Connecting / Offline";
+                SetBrushResource(IconPower, Shape.FillProperty, "TextFillColorTertiaryBrush");
+                BtnHeaderPower.ToolTip = "Power: Standby (click to turn on)";
             }
 
-            // Input Function
-            string fn = state.Function.ToUpperInvariant();
-            BtnInputSource.Content = $"{fn} ▾";
-            TxtInput.Text = state.Function.ToLowerInvariant() switch
+            var function = string.IsNullOrWhiteSpace(state.Function) ? "HDMI" : state.Function;
+            var normalizedFunction = function.ToUpperInvariant();
+            TxtHeaderInput.Text = normalizedFunction;
+            TxtInput.Text = function.ToLowerInvariant() switch
             {
                 "tv" => "TV / eARC",
                 "bluetooth" => "Bluetooth",
                 "hdmi" => "HDMI",
-                _ => fn
+                _ => normalizedFunction
             };
+            AutomationProperties.SetName(BtnInputSource, $"Input source: {TxtInput.Text}");
 
             ImgCodecBadge.Source = IconHelper.GetImageSource(state.CodecBadgeKind);
             TxtCodecName.Text = state.HumanCodec;
@@ -275,7 +299,9 @@ public partial class FlyoutWindow : Window
             if (!string.IsNullOrEmpty(state.Channel))
             {
                 BadgeChannel.Visibility = Visibility.Visible;
-                TxtChannel.Text = state.Channel.EndsWith("ch", StringComparison.OrdinalIgnoreCase) ? state.Channel : $"{state.Channel} ch";
+                TxtChannel.Text = state.Channel.EndsWith("ch", StringComparison.OrdinalIgnoreCase)
+                    ? state.Channel
+                    : $"{state.Channel} ch";
             }
             else
             {
@@ -287,6 +313,7 @@ public partial class FlyoutWindow : Window
                 SliderVolume.Value = state.Volume;
                 TxtVolumeValue.Text = state.Volume.ToString();
             }
+
             var connectedAndPowered = state.Connected && state.Power;
             BtnHeaderPower.IsEnabled = state.Connected;
             BtnInputSource.IsEnabled = connectedAndPowered;
@@ -299,24 +326,28 @@ public partial class FlyoutWindow : Window
             BtnVoiceMode.IsEnabled = connectedAndPowered;
             SliderVolume.IsEnabled = connectedAndPowered;
 
-            // Speaker / Mute icon update (Windows style mute icon in #D0D0D0)
-            IconSpeaker.Data = state.Mute ? SpeakerMutedGeometry : SpeakerUnmutedGeometry;
-            IconSpeaker.Fill = LightGrayBrush;
+            AutomationProperties.SetName(
+                BtnHeaderPower,
+                !state.Connected
+                    ? "Soundbar power: offline"
+                    : state.Power ? "Soundbar power: on" : "Soundbar power: standby");
+            AutomationProperties.SetName(
+                BtnSliderMute,
+                state.Mute ? "Unmute (currently muted)" : "Mute (currently unmuted)");
 
+            IconSpeaker.Data = state.Mute ? SpeakerMutedGeometry : SpeakerUnmutedGeometry;
             UpdateBassPills(state.Bass);
 
             SliderRear.Value = state.RearLevel;
             TxtRearValue.Text = state.RearLevel > 0 ? $"+{state.RearLevel}" : state.RearLevel.ToString();
             SliderRear.IsEnabled = connectedAndPowered;
 
+            BtnSoundField.IsChecked = state.SoundField;
+            BtnNightMode.IsChecked = state.NightMode;
+            BtnVoiceMode.IsChecked = state.VoiceMode;
             TxtSoundFieldStatus.Text = state.SoundField ? "On" : "Off";
-            TxtSoundFieldStatus.Foreground = state.SoundField ? BlueBrush : GrayBrush;
-
             TxtNightModeStatus.Text = state.NightMode ? "On" : "Off";
-            TxtNightModeStatus.Foreground = state.NightMode ? BlueBrush : GrayBrush;
-
             TxtVoiceModeStatus.Text = state.VoiceMode ? "On" : "Off";
-            TxtVoiceModeStatus.Foreground = state.VoiceMode ? BlueBrush : GrayBrush;
         }
         finally
         {
@@ -324,51 +355,317 @@ public partial class FlyoutWindow : Window
         }
     }
 
+    private void OnDeactivated(object? sender, EventArgs e)
+    {
+        if (_allowClose) return;
+
+        CaptureDeactivationContext();
+
+        if (_inputMenuOpen)
+        {
+            _deactivatedWhileInputMenuOpen = true;
+            return;
+        }
+
+        RequestClose(causedByDeactivation: true);
+    }
+
+    private void CaptureDeactivationContext()
+    {
+        _lastDeactivationCursor = null;
+        if (GetCursorPos(out var cursor))
+            _lastDeactivationCursor = new PixelPoint(cursor.X, cursor.Y);
+        _lastDeactivationMessageTime = unchecked((uint)GetMessageTime());
+    }
+
+    private void RequestClose(bool causedByDeactivation)
+    {
+        var transition = _presentation.Hide(causedByDeactivation);
+        if (transition.Exists) BeginClose(transition);
+    }
+
+    private void BeginOpen(FlyoutTransition transition, PixelRect? trayAnchor)
+    {
+        StopAnimation();
+        _openSettingsAfterClose = false;
+        _trayAnchor = trayAnchor ?? _trayAnchor;
+        var wasVisible = IsVisible;
+
+        if (!wasVisible)
+        {
+            RootBorder.Opacity = 0;
+            Show();
+        }
+
+        UpdateLayout();
+        _placement = wasVisible
+            ? CalculatePlacement(_trayAnchor)
+            : ResolvePlacement(_trayAnchor);
+        var target = _placement.Bounds;
+        var start = wasVisible && TryGetWindowBounds(out var current)
+            ? current
+            : OffsetTowardTaskbar(target, _placement.TaskbarEdge, GetAnimationOffset());
+
+        SetWindowPosition(start.Left, start.Top);
+        Activate();
+        if (!_presentation.IsCurrent(transition)) return;
+        StartAnimation(transition, start, target, RootBorder.Opacity, 1, TimeSpan.FromMilliseconds(170), easeOut: true);
+    }
+
+    private void BeginClose(FlyoutTransition transition)
+    {
+        StopAnimation();
+        if (!IsVisible || !TryGetWindowBounds(out var start))
+        {
+            FinishTransition(transition);
+            return;
+        }
+
+        var target = OffsetTowardTaskbar(start, _placement.TaskbarEdge, GetAnimationOffset());
+        StartAnimation(transition, start, target, RootBorder.Opacity, 0, TimeSpan.FromMilliseconds(125), easeOut: false);
+    }
+
+    private void StartAnimation(
+        FlyoutTransition transition,
+        PixelRect start,
+        PixelRect target,
+        double startOpacity,
+        double targetOpacity,
+        TimeSpan duration,
+        bool easeOut)
+    {
+        if (!SystemParameters.ClientAreaAnimation)
+        {
+            SetWindowPosition(target.Left, target.Top);
+            RootBorder.Opacity = targetOpacity;
+            FinishTransition(transition);
+            return;
+        }
+
+        var startedAt = Stopwatch.GetTimestamp();
+        var timer = new DispatcherTimer(DispatcherPriority.Render, Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(16)
+        };
+        _animationTimer = timer;
+        timer.Tick += (_, _) =>
+        {
+            if (!_presentation.IsCurrent(transition))
+            {
+                StopAnimation(timer);
+                return;
+            }
+
+            var linearProgress = Math.Clamp(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds / duration.TotalMilliseconds, 0, 1);
+            var easedProgress = easeOut
+                ? 1 - Math.Pow(1 - linearProgress, 3)
+                : Math.Pow(linearProgress, 3);
+
+            var left = Interpolate(start.Left, target.Left, easedProgress);
+            var top = Interpolate(start.Top, target.Top, easedProgress);
+            SetWindowPosition(left, top);
+            RootBorder.Opacity = startOpacity + ((targetOpacity - startOpacity) * easedProgress);
+
+            if (linearProgress >= 1)
+            {
+                StopAnimation(timer);
+                FinishTransition(transition);
+            }
+        };
+        timer.Start();
+    }
+
+    private void FinishTransition(FlyoutTransition transition)
+    {
+        if (!_presentation.Complete(transition)) return;
+
+        if (_presentation.State == FlyoutPresentationState.Open)
+        {
+            _placement = ResolvePlacement(_trayAnchor);
+            SetWindowPosition(_placement.Bounds.Left, _placement.Bounds.Top);
+            RootBorder.Opacity = 1;
+        }
+        else if (_presentation.State == FlyoutPresentationState.Hidden)
+        {
+            RootBorder.Opacity = 0;
+            Hide();
+            RootBorder.Opacity = 1;
+            if (_openSettingsAfterClose && !_allowClose &&
+                !Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+            {
+                _openSettingsAfterClose = false;
+                Dispatcher.BeginInvoke(_onOpenSettings, DispatcherPriority.Background);
+            }
+        }
+    }
+
+    private void StopAnimation()
+    {
+        var timer = _animationTimer;
+        _animationTimer = null;
+        timer?.Stop();
+    }
+
+    private void StopAnimation(DispatcherTimer timer)
+    {
+        timer.Stop();
+        if (ReferenceEquals(_animationTimer, timer))
+            _animationTimer = null;
+    }
+
+    private FlyoutPlacement CalculatePlacement(PixelRect? requestedAnchor)
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        var anchor = requestedAnchor ?? GetCursorAnchor();
+        var monitorPoint = new PointNative { X = anchor.CenterX, Y = anchor.CenterY };
+        var monitorHandle = MonitorFromPoint(monitorPoint, MonitorDefaultToNearest);
+        var monitorInfo = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+
+        if (monitorHandle != IntPtr.Zero &&
+            GetMonitorInfo(monitorHandle, ref monitorInfo))
+        {
+            var dpi = Math.Max(96u, GetDpiForWindow(hwnd));
+            var margin = (int)Math.Round(12 * dpi / 96d);
+            var maximumWidth = Math.Max(
+                1,
+                (monitorInfo.WorkArea.Right - monitorInfo.WorkArea.Left - (2 * margin)) * 96d / dpi);
+            var maximumHeight = Math.Max(
+                1,
+                (monitorInfo.WorkArea.Bottom - monitorInfo.WorkArea.Top - (2 * margin)) * 96d / dpi);
+            if (Math.Abs(MaxWidth - maximumWidth) > 0.5 || Math.Abs(MaxHeight - maximumHeight) > 0.5)
+            {
+                MaxWidth = maximumWidth;
+                MaxHeight = maximumHeight;
+                UpdateLayout();
+            }
+
+            if (GetWindowRect(hwnd, out var windowRect))
+            {
+                return FlyoutPlacementCalculator.Calculate(
+                    ToPixelRect(monitorInfo.Monitor),
+                    ToPixelRect(monitorInfo.WorkArea),
+                    anchor,
+                    Math.Max(1, windowRect.Right - windowRect.Left),
+                    Math.Max(1, windowRect.Bottom - windowRect.Top),
+                    margin);
+            }
+        }
+
+        var fallback = SystemParameters.WorkArea;
+        MaxWidth = Math.Max(1, fallback.Width - 24);
+        MaxHeight = Math.Max(1, fallback.Height - 24);
+        UpdateLayout();
+        var width = Math.Max(1, (int)Math.Ceiling(ActualWidth > 0 ? ActualWidth : Width));
+        var height = Math.Max(1, (int)Math.Ceiling(ActualHeight > 0 ? ActualHeight : 480));
+        var work = new PixelRect((int)fallback.Left, (int)fallback.Top, (int)fallback.Right, (int)fallback.Bottom);
+        return FlyoutPlacementCalculator.Calculate(work, work, anchor, width, height, 12);
+    }
+
+    private FlyoutPlacement ResolvePlacement(PixelRect? requestedAnchor)
+    {
+        var initial = CalculatePlacement(requestedAnchor);
+        SetWindowPosition(initial.Bounds.Left, initial.Bounds.Top);
+        UpdateLayout();
+        return CalculatePlacement(requestedAnchor);
+    }
+
+    private static PixelRect GetCursorAnchor()
+    {
+        return GetCursorPos(out var cursor)
+            ? PixelRect.FromPositionAndSize(cursor.X, cursor.Y, 1, 1)
+            : PixelRect.FromPositionAndSize(0, 0, 1, 1);
+    }
+
+    private bool TryGetWindowBounds(out PixelRect bounds)
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd != IntPtr.Zero && GetWindowRect(hwnd, out var rect))
+        {
+            bounds = ToPixelRect(rect);
+            return true;
+        }
+
+        bounds = default;
+        return false;
+    }
+
+    private void SetWindowPosition(int left, int top)
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero) return;
+        _ = SetWindowPos(hwnd, IntPtr.Zero, left, top, 0, 0, SwpNoSize | SwpNoZOrder | SwpNoActivate);
+    }
+
+    private int GetAnimationOffset()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        var dpi = hwnd == IntPtr.Zero ? 96u : Math.Max(96u, GetDpiForWindow(hwnd));
+        return Math.Max(8, (int)Math.Round(12 * dpi / 96d));
+    }
+
+    private static PixelRect OffsetTowardTaskbar(PixelRect rect, TaskbarEdge edge, int offset) => edge switch
+    {
+        TaskbarEdge.Left => PixelRect.FromPositionAndSize(rect.Left - offset, rect.Top, rect.Width, rect.Height),
+        TaskbarEdge.Top => PixelRect.FromPositionAndSize(rect.Left, rect.Top - offset, rect.Width, rect.Height),
+        TaskbarEdge.Right => PixelRect.FromPositionAndSize(rect.Left + offset, rect.Top, rect.Width, rect.Height),
+        _ => PixelRect.FromPositionAndSize(rect.Left, rect.Top + offset, rect.Width, rect.Height)
+    };
+
+    private static PixelRect ToPixelRect(RectNative rect) => new(rect.Left, rect.Top, rect.Right, rect.Bottom);
+
+    private static int Interpolate(int start, int end, double progress) =>
+        (int)Math.Round(start + ((end - start) * progress));
+
+    private static void SetBrushResource(FrameworkElement element, DependencyProperty property, string resourceKey) =>
+        element.SetResourceReference(property, resourceKey);
+
     private void UpdateBassPills(string bass)
     {
         bass = bass.ToLowerInvariant();
-        ApplySegmentStyle(BtnBassMin, bass == "min");
-        ApplySegmentStyle(BtnBassMid, bass == "mid");
-        ApplySegmentStyle(BtnBassMax, bass == "max");
+        ApplySegmentStyle(BtnBassMin, "Minimum bass", bass == "min");
+        ApplySegmentStyle(BtnBassMid, "Medium bass", bass == "mid");
+        ApplySegmentStyle(BtnBassMax, "Maximum bass", bass == "max");
     }
 
-    private void ApplySegmentStyle(Button btn, bool active)
+    private static void ApplySegmentStyle(Button button, string label, bool active)
     {
-        if (btn == null) return;
-        btn.Background = active ? BlueBrush : Brushes.Transparent;
-        btn.Foreground = active ? Brushes.Black : GrayBrush;
+        button.Tag = active;
+        button.SetResourceReference(
+            Control.BackgroundProperty,
+            active ? "AccentFillColorDefaultBrush" : "ControlFillColorTransparentBrush");
+        button.SetResourceReference(
+            Control.ForegroundProperty,
+            active ? "TextOnAccentFillColorPrimaryBrush" : "TextFillColorSecondaryBrush");
+        AutomationProperties.SetName(button, active ? $"{label}, selected" : label);
     }
 
     private void SliderVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_isUpdatingUi || TxtVolumeValue == null || _engine == null) return;
-        int vol = (int)Math.Round(e.NewValue);
-        TxtVolumeValue.Text = vol.ToString();
-        _ = _engine.SetVolumeAsync(vol);
+        if (!IsInitialized || _isUpdatingUi || TxtVolumeValue == null) return;
+        var volume = (int)Math.Round(e.NewValue);
+        TxtVolumeValue.Text = volume.ToString();
+        _ = _engine.SetVolumeAsync(volume);
     }
 
     private void SliderRear_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_isUpdatingUi || TxtRearValue == null || _engine == null) return;
-        int val = (int)Math.Round(e.NewValue);
-        TxtRearValue.Text = val > 0 ? $"+{val}" : val.ToString();
-        _ = _engine.SetRearLevelAsync(val);
+        if (!IsInitialized || _isUpdatingUi || TxtRearValue == null) return;
+        var value = (int)Math.Round(e.NewValue);
+        TxtRearValue.Text = value > 0 ? $"+{value}" : value.ToString();
+        _ = _engine.SetRearLevelAsync(value);
     }
 
     private void BorderVolume_MouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (_engine == null) return;
-        int step = e.Delta > 0 ? 1 : -1;
-        int target = Math.Clamp(_engine.CurrentState.Volume + step, 0, 100);
+        if (!SliderVolume.IsEnabled || e.Delta == 0) return;
+
+        e.Handled = true;
+        var step = e.Delta > 0 ? 1 : -1;
+        var target = Math.Clamp((int)Math.Round(SliderVolume.Value) + step, 0, 100);
         SliderVolume.Value = target;
-        TxtVolumeValue.Text = target.ToString();
-        _ = _engine.SetVolumeAsync(target);
     }
 
-    private void BtnSliderMute_Click(object sender, RoutedEventArgs e)
-    {
-        _ = _engine.ToggleMuteAsync();
-    }
+    private void BtnSliderMute_Click(object sender, RoutedEventArgs e) => _ = _engine.ToggleMuteAsync();
 
     private void BtnBassMin_Click(object sender, RoutedEventArgs e)
     {
@@ -388,50 +685,69 @@ public partial class FlyoutWindow : Window
         _ = _engine.SetBassAsync("max");
     }
 
-    private void BtnSoundField_Click(object sender, RoutedEventArgs e)
-    {
-        _ = _engine.ToggleSoundFieldAsync();
-    }
+    private void BtnSoundField_Click(object sender, RoutedEventArgs e) => _ = _engine.ToggleSoundFieldAsync();
 
-    private void BtnNightMode_Click(object sender, RoutedEventArgs e)
-    {
-        _ = _engine.ToggleNightModeAsync();
-    }
+    private void BtnNightMode_Click(object sender, RoutedEventArgs e) => _ = _engine.ToggleNightModeAsync();
 
-    private void BtnVoiceMode_Click(object sender, RoutedEventArgs e)
-    {
-        _ = _engine.ToggleVoiceModeAsync();
-    }
+    private void BtnVoiceMode_Click(object sender, RoutedEventArgs e) => _ = _engine.ToggleVoiceModeAsync();
 
-    private void BtnPower_Click(object sender, RoutedEventArgs e)
-    {
-        _ = _engine.TogglePowerAsync();
-    }
+    private void BtnPower_Click(object sender, RoutedEventArgs e) => _ = _engine.TogglePowerAsync();
 
     private void BtnInputSource_Click(object sender, RoutedEventArgs e)
     {
         var menu = new ContextMenu();
-        string[] inputs = { "hdmi", "tv", "bluetooth" };
-
-        foreach (var inp in inputs)
+        var shouldRestoreFocus = false;
+        _inputMenuOpen = true;
+        _deactivatedWhileInputMenuOpen = false;
+        menu.PreviewKeyDown += (_, args) =>
         {
+            if (args.Key == Key.Escape)
+                shouldRestoreFocus = true;
+        };
+        menu.Closed += (_, _) =>
+        {
+            _inputMenuOpen = false;
+
+            if (!IsVisible || _presentation.State != FlyoutPresentationState.Open)
+                return;
+
+            if (shouldRestoreFocus || !_deactivatedWhileInputMenuOpen)
+            {
+                _deactivatedWhileInputMenuOpen = false;
+                Activate();
+                return;
+            }
+
+            _deactivatedWhileInputMenuOpen = false;
+            CaptureDeactivationContext();
+            RequestClose(causedByDeactivation: true);
+        };
+
+        foreach (var input in new[] { "hdmi", "tv", "bluetooth" })
+        {
+            var targetInput = input;
             var item = new MenuItem
             {
-                Header = inp.ToUpperInvariant(),
-                IsChecked = string.Equals(_engine.CurrentState.Function, inp, StringComparison.OrdinalIgnoreCase)
+                Header = input.ToUpperInvariant(),
+                IsCheckable = true,
+                IsChecked = string.Equals(_engine.CurrentState.Function, input, StringComparison.OrdinalIgnoreCase)
             };
-            string targetInp = inp;
-            item.Click += (s, ev) => _ = _engine.SetFunctionAsync(targetInp);
+            item.Click += (_, _) =>
+            {
+                shouldRestoreFocus = true;
+                _ = _engine.SetFunctionAsync(targetInput);
+            };
             menu.Items.Add(item);
         }
 
         menu.PlacementTarget = BtnInputSource;
+        menu.Placement = PlacementMode.Bottom;
         menu.IsOpen = true;
     }
 
     private void BtnSettings_Click(object sender, RoutedEventArgs e)
     {
-        Hide();
-        _onOpenSettings.Invoke();
+        _openSettingsAfterClose = true;
+        RequestClose(causedByDeactivation: false);
     }
 }

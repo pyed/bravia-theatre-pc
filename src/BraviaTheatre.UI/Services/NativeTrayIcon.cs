@@ -1,8 +1,10 @@
 using System;
 using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
+using System.Windows.Threading;
 
 namespace BraviaTheatre.UI.Services;
 
@@ -19,6 +21,7 @@ public sealed class NativeTrayIcon : IDisposable
     private const int NIM_ADD = 0x00000000;
     private const int NIM_MODIFY = 0x00000001;
     private const int NIM_DELETE = 0x00000002;
+    private const int NIM_SETFOCUS = 0x00000003;
     private const int NIM_SETVERSION = 0x00000004;
     private const int NOTIFYICON_VERSION_4 = 4;
 
@@ -28,6 +31,14 @@ public sealed class NativeTrayIcon : IDisposable
     private const int NIF_GUID = 0x00000020;
     private const int FullFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_GUID;
     private static readonly Guid TrayGuid = new("86AFAF46-103B-41C8-BBA9-7A0B802BFB0B");
+
+    internal enum TrayCallbackAction
+    {
+        None,
+        ToggleMouse,
+        ToggleKeyboard,
+        ContextMenu
+    }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct NOTIFYICONDATA
@@ -49,8 +60,31 @@ public sealed class NativeTrayIcon : IDisposable
         public IntPtr hBalloonIcon;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NOTIFYICONIDENTIFIER
+    {
+        public int cbSize;
+        public IntPtr hWnd;
+        public int uID;
+        public Guid guidItem;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool Shell_NotifyIcon(int dwMessage, ref NOTIFYICONDATA lpdata);
+
+    [DllImport("shell32.dll")]
+    private static extern int Shell_NotifyIconGetRect(
+        ref NOTIFYICONIDENTIFIER identifier,
+        out RECT iconLocation);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern uint RegisterWindowMessage(string lpString);
@@ -58,20 +92,28 @@ public sealed class NativeTrayIcon : IDisposable
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    private static extern int GetMessageTime();
+
     private readonly HwndSource _hwndSource;
     private readonly IntPtr _hwnd;
     private readonly uint _wmTaskbarCreated;
     private readonly uint _wmShowFlyout;
     private NOTIFYICONDATA _nid;
     private bool _isAdded;
+    private bool _usesVersion4;
+    private bool _hasPresentation;
     private bool _disposed;
+    private DispatcherTimer? _explorerRecoveryTimer;
+    private int _explorerRecoveryAttempts;
 
     public ContextMenu? ContextMenu { get; set; }
+    internal Action<TrayActivation>? ToggleAction { get; set; }
     public Action? ShowAction { get; set; }
+    public Action? IconRecreatedAction { get; set; }
     public Action<string>? LogAction { get; set; }
 
-    // Compatibility for callers; activation is now always interpreted as "show" rather than toggle.
-    public Action? LeftClickAction { get => ShowAction; set => ShowAction = value; }
+    public Action? LeftClickAction { get; set; }
 
     public NativeTrayIcon()
     {
@@ -109,13 +151,32 @@ public sealed class NativeTrayIcon : IDisposable
 
     public bool UpdateIcon(Icon icon, string tooltip)
     {
-        if (_disposed || !_isAdded) return false;
+        if (_disposed) return false;
         SetPresentation(icon, tooltip);
-        return Modify();
+        return _isAdded && Modify();
+    }
+
+    internal bool TryGetIconBounds(out PixelRect bounds)
+    {
+        bounds = default;
+        if (_disposed || !_isAdded) return false;
+
+        var identifier = new NOTIFYICONIDENTIFIER
+        {
+            cbSize = Marshal.SizeOf<NOTIFYICONIDENTIFIER>(),
+            hWnd = _hwnd,
+            uID = _nid.uID,
+            guidItem = TrayGuid
+        };
+
+        if (Shell_NotifyIconGetRect(ref identifier, out var rect) != 0) return false;
+        bounds = new PixelRect(rect.Left, rect.Top, rect.Right, rect.Bottom);
+        return bounds.Width > 0 && bounds.Height > 0;
     }
 
     private void SetPresentation(Icon icon, string tooltip)
     {
+        _hasPresentation = true;
         _nid.uFlags = FullFlags;
         _nid.hIcon = icon.Handle;
         _nid.szTip = string.IsNullOrEmpty(tooltip)
@@ -134,7 +195,8 @@ public sealed class NativeTrayIcon : IDisposable
         }
 
         _nid.uVersionOrTimeout = NOTIFYICON_VERSION_4;
-        if (!Shell_NotifyIcon(NIM_SETVERSION, ref _nid))
+        _usesVersion4 = Shell_NotifyIcon(NIM_SETVERSION, ref _nid);
+        if (!_usesVersion4)
             LogAction?.Invoke($"Tray icon version negotiation failed (Win32 error {Marshal.GetLastWin32Error()}).");
         _isAdded = true;
         return true;
@@ -153,12 +215,22 @@ public sealed class NativeTrayIcon : IDisposable
         if (msg == WM_TRAYICON)
         {
             var eventId = lParam.ToInt32() & 0xFFFF;
-            if (eventId is WM_LBUTTONUP or NIN_SELECT or NIN_KEYSELECT)
+            var action = ClassifyCallback(eventId, _usesVersion4);
+            if (action is TrayCallbackAction.ToggleMouse or TrayCallbackAction.ToggleKeyboard)
             {
-                ShowAction?.Invoke();
+                var activation = new TrayActivation(
+                    action == TrayCallbackAction.ToggleKeyboard
+                        ? TrayActivationKind.Keyboard
+                        : TrayActivationKind.Mouse,
+                    _usesVersion4 ? DecodeCallbackPoint(wParam) : null,
+                    unchecked((uint)GetMessageTime()));
+                if (ToggleAction != null)
+                    ToggleAction.Invoke(activation);
+                else
+                    LeftClickAction?.Invoke();
                 handled = true;
             }
-            else if (eventId is WM_RBUTTONUP or WM_CONTEXTMENU)
+            else if (action == TrayCallbackAction.ContextMenu)
             {
                 ShowContextMenu();
                 handled = true;
@@ -169,24 +241,113 @@ public sealed class NativeTrayIcon : IDisposable
             ShowAction?.Invoke();
             handled = true;
         }
-        else if (msg == (int)_wmTaskbarCreated && _isAdded)
+        else if (msg == (int)_wmTaskbarCreated && _hasPresentation)
         {
             _isAdded = false;
-            Add();
+            _usesVersion4 = false;
+            BeginExplorerRecovery();
             handled = true;
         }
 
         return IntPtr.Zero;
     }
 
+    internal static TrayCallbackAction ClassifyCallback(int eventId, bool usesVersion4) =>
+        usesVersion4
+            ? eventId switch
+            {
+                NIN_SELECT => TrayCallbackAction.ToggleMouse,
+                NIN_KEYSELECT => TrayCallbackAction.ToggleKeyboard,
+                WM_CONTEXTMENU => TrayCallbackAction.ContextMenu,
+                _ => TrayCallbackAction.None
+            }
+            : eventId switch
+            {
+                WM_LBUTTONUP => TrayCallbackAction.ToggleMouse,
+                WM_RBUTTONUP => TrayCallbackAction.ContextMenu,
+                _ => TrayCallbackAction.None
+            };
+
+    internal static PixelPoint DecodeCallbackPoint(IntPtr packedPoint)
+    {
+        var packed = unchecked((uint)packedPoint.ToInt64());
+        return new PixelPoint(
+            unchecked((short)(packed & 0xffff)),
+            unchecked((short)((packed >> 16) & 0xffff)));
+    }
+
     private void ShowContextMenu()
     {
-        if (ContextMenu == null) return;
+        var menu = ContextMenu;
+        if (menu == null) return;
+        if (menu.IsOpen) return;
         SetForegroundWindow(_hwnd);
-        ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
-        ContextMenu.HorizontalOffset = 0;
-        ContextMenu.VerticalOffset = 0;
-        ContextMenu.IsOpen = true;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
+        menu.HorizontalOffset = 0;
+        menu.VerticalOffset = 0;
+
+        RoutedEventHandler? onClosed = null;
+        onClosed = (_, _) =>
+        {
+            menu.Closed -= onClosed;
+            RestoreTrayFocus();
+        };
+        menu.Closed += onClosed;
+        menu.IsOpen = true;
+    }
+
+    private void RestoreTrayFocus()
+    {
+        if (_disposed || !_isAdded) return;
+        var focusData = _nid;
+        focusData.uFlags = NIF_GUID;
+        _ = Shell_NotifyIcon(NIM_SETFOCUS, ref focusData);
+    }
+
+    private void BeginExplorerRecovery()
+    {
+        StopExplorerRecovery();
+        _explorerRecoveryAttempts = 0;
+
+        var timer = new DispatcherTimer(DispatcherPriority.Background, _hwndSource.Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(200)
+        };
+        timer.Tick += (_, _) => TryCompleteExplorerRecovery();
+        _explorerRecoveryTimer = timer;
+
+        TryCompleteExplorerRecovery();
+        if (ReferenceEquals(_explorerRecoveryTimer, timer))
+            timer.Start();
+    }
+
+    private void TryCompleteExplorerRecovery()
+    {
+        if (_disposed)
+        {
+            StopExplorerRecovery();
+            return;
+        }
+
+        _explorerRecoveryAttempts++;
+        if (!_isAdded && !Add())
+        {
+            if (_explorerRecoveryAttempts >= 8)
+                StopExplorerRecovery();
+            return;
+        }
+
+        if (TryGetIconBounds(out _) || _explorerRecoveryAttempts >= 8)
+        {
+            StopExplorerRecovery();
+            IconRecreatedAction?.Invoke();
+        }
+    }
+
+    private void StopExplorerRecovery()
+    {
+        _explorerRecoveryTimer?.Stop();
+        _explorerRecoveryTimer = null;
     }
 
     private void ThrowIfDisposed()
@@ -198,6 +359,7 @@ public sealed class NativeTrayIcon : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        StopExplorerRecovery();
         if (_isAdded)
         {
             _nid.uFlags = NIF_GUID;

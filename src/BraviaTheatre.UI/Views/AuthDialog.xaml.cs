@@ -24,6 +24,7 @@ public partial class AuthDialog : Window
     public AuthDialog(SonyCredentialStore credentialStore)
     {
         InitializeComponent();
+        WindowBackdropService.Attach(this, WindowBackdropKind.MainWindow);
         _credentialStore = credentialStore;
     }
 

@@ -20,6 +20,7 @@ public partial class SettingsWindow : Window
     public SettingsWindow(AppSettings settings, Action onReAuth)
     {
         InitializeComponent();
+        WindowBackdropService.Attach(this, WindowBackdropKind.MainWindow);
         _settings = settings;
         _onReAuth = onReAuth;
 
@@ -57,11 +58,12 @@ public partial class SettingsWindow : Window
 
     private void HotkeyBox_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        e.Handled = true;
-
         if (sender is not TextBox box) return;
 
         Key key = (e.Key == Key.System ? e.SystemKey : e.Key);
+
+        if (key is Key.Tab or Key.Escape) return;
+        e.Handled = true;
 
         if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin)
             return;

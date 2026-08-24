@@ -15,13 +15,13 @@ Built with C# and .NET 10, the application communicates directly with the device
 ## Features
 
 - Live codec and channel display, with distinct badges for Dolby Atmos, Dolby Audio, Dolby TrueHD, DTS/DTS:X, IMAX Enhanced, LPCM/PCM, AAC, DSD, and Sony 360 Reality Audio.
-- A compact Windows quick-controls flyout for volume, mute, input, bass, optional rear-speaker level, sound field, night mode, voice mode, and power.
+- A Windows 11 Fluent quick-controls flyout with native desktop Acrylic, system light/dark and accent colors, high-contrast support, and controls for volume, mute, input, bass, optional rear-speaker level, sound field, night mode, voice mode, and power.
 - Configurable global shortcuts, registered atomically so a conflicting shortcut cannot leave a partial hotkey setup.
 - Embedded Sony OAuth sign-in with PKCE and callback-state verification, a manual browser fallback, and explicit device selection when an account contains multiple compatible devices.
 - Windows user-scoped credential protection using DPAPI. Sony cloud access and refresh tokens are not persisted.
 - Automatic local discovery using mDNS first, followed by a bounded subnet probe that fingerprints candidates before connecting.
 - Connection-scoped workers, health polling, command coalescing, stale-command rejection, and clean reconnect/teardown behavior.
-- Native Win32 tray integration with Explorer restart recovery, a supported Taskbar Settings shortcut and one-time visibility guidance, multi-monitor flyout placement, and single-instance activation.
+- Native Win32 tray integration with Explorer restart recovery, a supported Taskbar Settings shortcut and one-time visibility guidance, taskbar-aware multi-monitor placement, reduced-motion-aware slide animations, click-to-toggle behavior, and show-only single-instance activation.
 - Atomic settings storage, Windows startup integration, configurable logging, and optional static host/port override.
 
 Default shortcuts are:

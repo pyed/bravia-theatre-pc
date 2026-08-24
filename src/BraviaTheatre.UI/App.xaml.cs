@@ -222,15 +222,22 @@ public partial class App : Application
         _trayIcon = new NativeTrayIcon
         {
             LogAction = message => Log(message, AppLogLevel.Info),
+            ToggleAction = activation =>
+            {
+                Log("Tray activated. Toggling flyout...");
+                TogglePrimarySurface(activation);
+            },
             ShowAction = () =>
             {
-                Log("Tray activated. Showing flyout...");
+                Log("Application activation requested. Showing flyout...");
                 ShowPrimarySurface();
-            }
+            },
+            IconRecreatedAction = () => _flyout?.RepositionIfVisible(TryGetTrayAnchor())
         };
 
         // Right-click context menu
         var menu = new ContextMenu();
+        menu.Opened += (_, _) => _flyout?.ResolveTrayInteraction();
 
         _headerMenuItem = new MenuItem
         {
@@ -418,7 +425,21 @@ public partial class App : Application
     {
         if (_authDialog != null) { _authDialog.Activate(); return; }
         if (_settingsWindow != null) { _settingsWindow.Activate(); return; }
-        _flyout?.ShowFlyout();
+        _flyout?.ShowFlyout(TryGetTrayAnchor());
+    }
+
+    private void TogglePrimarySurface(TrayActivation activation)
+    {
+        if (_authDialog != null) { _authDialog.Activate(); return; }
+        if (_settingsWindow != null) { _settingsWindow.Activate(); return; }
+        _flyout?.ToggleFromTray(activation, TryGetTrayAnchor());
+    }
+
+    private PixelRect? TryGetTrayAnchor()
+    {
+        return _trayIcon != null && _trayIcon.TryGetIconBounds(out var bounds)
+            ? bounds
+            : null;
     }
 
     private void OnEngineStateChanged(long generation, SoundbarState state)
