@@ -2,7 +2,6 @@ using System;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Threading;
 
@@ -93,9 +92,6 @@ public sealed class NativeTrayIcon : IDisposable
     private static extern uint RegisterWindowMessage(string lpString);
 
     [DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
     private static extern int GetMessageTime();
 
     private readonly HwndSource _hwndSource;
@@ -107,11 +103,10 @@ public sealed class NativeTrayIcon : IDisposable
     private bool _usesVersion4;
     private bool _hasPresentation;
     private bool _disposed;
-    private readonly TrayContextMenuCoordinator _contextMenuCoordinator = new();
     private DispatcherTimer? _explorerRecoveryTimer;
     private int _explorerRecoveryAttempts;
 
-    public ContextMenu? ContextMenu { get; set; }
+    public Action? ContextMenuAction { get; set; }
     internal Action<TrayActivation>? ToggleAction { get; set; }
     public Action? ShowAction { get; set; }
     public Action? IconRecreatedAction { get; set; }
@@ -233,7 +228,7 @@ public sealed class NativeTrayIcon : IDisposable
             }
             else if (action == TrayCallbackAction.ContextMenu)
             {
-                ShowContextMenu();
+                ContextMenuAction?.Invoke();
                 handled = true;
             }
         }
@@ -278,16 +273,7 @@ public sealed class NativeTrayIcon : IDisposable
     }
 
     private void HandleToggle(TrayActivation activation)
-    {
-        if (_contextMenuCoordinator.TryDefer(activation))
-        {
-            if (ContextMenu?.IsOpen == true)
-                ContextMenu.IsOpen = false;
-            return;
-        }
-
-        InvokeToggle(activation);
-    }
+        => InvokeToggle(activation);
 
     private void InvokeToggle(TrayActivation activation)
     {
@@ -297,38 +283,7 @@ public sealed class NativeTrayIcon : IDisposable
             LeftClickAction?.Invoke();
     }
 
-    private void ShowContextMenu()
-    {
-        var menu = ContextMenu;
-        if (menu == null) return;
-        if (menu.IsOpen || _contextMenuCoordinator.IsOpen) return;
-        SetForegroundWindow(_hwnd);
-        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
-        menu.HorizontalOffset = 0;
-        menu.VerticalOffset = 0;
-
-        RoutedEventHandler? onClosed = null;
-        onClosed = (_, _) =>
-        {
-            menu.Closed -= onClosed;
-            var pendingActivation = _contextMenuCoordinator.Close();
-            if (pendingActivation is { } activation)
-            {
-                _hwndSource.Dispatcher.BeginInvoke(
-                    () => InvokeToggle(activation),
-                    DispatcherPriority.Input);
-            }
-            else
-            {
-                RestoreTrayFocus();
-            }
-        };
-        menu.Closed += onClosed;
-        _contextMenuCoordinator.Open();
-        menu.IsOpen = true;
-    }
-
-    private void RestoreTrayFocus()
+    internal void RestoreTrayFocus()
     {
         if (_disposed || !_isAdded) return;
         var focusData = _nid;
@@ -400,33 +355,5 @@ public sealed class NativeTrayIcon : IDisposable
         }
         _hwndSource.RemoveHook(WndProc);
         _hwndSource.Dispose();
-    }
-}
-
-internal sealed class TrayContextMenuCoordinator
-{
-    private TrayActivation? _pendingActivation;
-
-    public bool IsOpen { get; private set; }
-
-    public void Open()
-    {
-        IsOpen = true;
-        _pendingActivation = null;
-    }
-
-    public bool TryDefer(TrayActivation activation)
-    {
-        if (!IsOpen) return false;
-        _pendingActivation = activation;
-        return true;
-    }
-
-    public TrayActivation? Close()
-    {
-        IsOpen = false;
-        var pending = _pendingActivation;
-        _pendingActivation = null;
-        return pending;
     }
 }

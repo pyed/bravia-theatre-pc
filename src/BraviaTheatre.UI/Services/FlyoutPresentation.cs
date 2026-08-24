@@ -173,6 +173,34 @@ internal static class TrayInteractionCorrelator
         TimeSpan.FromMilliseconds(unchecked(later - earlier));
 }
 
+internal sealed class TrayContextMenuCoordinator
+{
+    private TrayActivation? _pendingActivation;
+
+    public bool IsOpen { get; private set; }
+
+    public void Open()
+    {
+        IsOpen = true;
+        _pendingActivation = null;
+    }
+
+    public bool TryDefer(TrayActivation activation)
+    {
+        if (!IsOpen) return false;
+        _pendingActivation = activation;
+        return true;
+    }
+
+    public TrayActivation? Close()
+    {
+        IsOpen = false;
+        var pending = _pendingActivation;
+        _pendingActivation = null;
+        return pending;
+    }
+}
+
 internal enum FlyoutPresentationState
 {
     Hidden,

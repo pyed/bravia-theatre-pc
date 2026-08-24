@@ -422,6 +422,7 @@ public partial class FlyoutWindow : Window
 
         SetWindowPosition(start.Left, start.Top);
         Activate();
+        WindowBackdropService.Refresh(this);
         if (!_presentation.IsCurrent(transition)) return;
         StartAnimation(transition, start, target, RootBorder.Opacity, 1, TimeSpan.FromMilliseconds(170), easeOut: true);
     }
@@ -498,6 +499,7 @@ public partial class FlyoutWindow : Window
             _placement = ResolvePlacement(_trayAnchor);
             SetWindowPosition(_placement.Bounds.Left, _placement.Bounds.Top);
             RootBorder.Opacity = 1;
+            WindowBackdropService.Refresh(this);
         }
         else if (_presentation.State == FlyoutPresentationState.Hidden)
         {

@@ -1,5 +1,5 @@
-using BraviaTheatre.UI.Services;
 using BraviaTheatre.Core.Models;
+using BraviaTheatre.UI.Services;
 
 namespace BraviaTheatre.Tests;
 
@@ -332,7 +332,7 @@ public class FlyoutPresentationTests
     }
 
     [Fact]
-    public void Windows11Build22621UsesDesktopAcrylicForTransientFlyouts()
+    public void Windows11UsesTintedAcrylicCompositionForTransientFlyouts()
     {
         var plan = WindowBackdropService.CreatePlan(
             new Version(10, 0, 22621),
@@ -340,7 +340,8 @@ public class FlyoutPresentationTests
             WindowBackdropKind.TransientWindow);
 
         Assert.True(plan.UseRoundedCorners);
-        Assert.Equal(DwmSystemBackdropType.TransientWindow, plan.BackdropType);
+        Assert.Equal(DwmSystemBackdropType.None, plan.BackdropType);
+        Assert.True(plan.UseAcrylicComposition);
         Assert.False(plan.UseOpaqueFallback);
     }
 
@@ -354,6 +355,7 @@ public class FlyoutPresentationTests
 
         Assert.True(plan.UseRoundedCorners);
         Assert.Equal(DwmSystemBackdropType.TabbedWindow, plan.BackdropType);
+        Assert.False(plan.UseAcrylicComposition);
         Assert.False(plan.UseOpaqueFallback);
     }
 
@@ -369,6 +371,7 @@ public class FlyoutPresentationTests
 
         Assert.Equal(rounded, plan.UseRoundedCorners);
         Assert.Equal(DwmSystemBackdropType.Auto, plan.BackdropType);
+        Assert.False(plan.UseAcrylicComposition);
         Assert.True(plan.UseOpaqueFallback);
     }
 
@@ -382,36 +385,54 @@ public class FlyoutPresentationTests
 
         Assert.True(plan.UseRoundedCorners);
         Assert.Equal(DwmSystemBackdropType.None, plan.BackdropType);
+        Assert.False(plan.UseAcrylicComposition);
         Assert.True(plan.UseOpaqueFallback);
     }
 
     [Theory]
-    [InlineData(-1, 0)]
     [InlineData(0, -1)]
-    public void FailedDwmCallsForceAnOpaqueFallback(int backdropResult, int frameResult)
+    [InlineData(-1, 0)]
+    public void FailedAcrylicAndFallbackCallsForceAnOpaqueFallback(int accentResult, int frameResult)
     {
         var plan = WindowBackdropService.CreatePlan(
             new Version(10, 0, 26100),
             highContrast: false,
             WindowBackdropKind.TransientWindow);
 
-        Assert.True(WindowBackdropService.RequiresOpaqueFallback(plan, backdropResult, frameResult));
+        Assert.True(WindowBackdropService.RequiresOpaqueFallback(
+            plan,
+            backdropResult: -1,
+            frameResult,
+            accentResult));
     }
 
     [Fact]
-    public void SuccessfulDwmCallsKeepTheTransparentCompositionSurface()
+    public void SuccessfulAcrylicCompositionKeepsTheTransparentSurface()
     {
         var plan = WindowBackdropService.CreatePlan(
             new Version(10, 0, 26100),
             highContrast: false,
             WindowBackdropKind.TransientWindow);
 
-        Assert.False(WindowBackdropService.RequiresOpaqueFallback(plan, backdropResult: 0, frameResult: 0));
+        Assert.False(WindowBackdropService.RequiresOpaqueFallback(
+            plan,
+            backdropResult: -1,
+            frameResult: 0,
+            accentResult: 1));
+    }
+
+    [Fact]
+    public void AcrylicTintTracksTheWindowsTheme()
+    {
+        Assert.Equal(unchecked((int)0x99202020), WindowBackdropService.AcrylicTintColor(useDarkMode: true));
+        Assert.Equal(unchecked((int)0xCCF7F7F7), WindowBackdropService.AcrylicTintColor(useDarkMode: false));
     }
 
     [Theory]
     [InlineData(0x0015)] // WM_SYSCOLORCHANGE
+    [InlineData(0x007E)] // WM_DISPLAYCHANGE
     [InlineData(0x001A)] // WM_SETTINGCHANGE
+    [InlineData(0x02E0)] // WM_DPICHANGED
     [InlineData(0x031A)] // WM_THEMECHANGED
     [InlineData(0x031E)] // WM_DWMCOMPOSITIONCHANGED
     [InlineData(0x0320)] // WM_DWMCOLORIZATIONCOLORCHANGED

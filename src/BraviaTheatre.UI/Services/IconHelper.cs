@@ -52,7 +52,11 @@ public static class IconHelper
         try
         {
             var uri = new Uri($"pack://application:,,,/Assets/Icons/{key}.png", UriKind.Absolute);
-            var bitmap = new BitmapImage(uri);
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.UriSource = uri;
+            bitmap.EndInit();
             bitmap.Freeze();
             return bitmap;
         }
@@ -74,8 +78,11 @@ public static class IconHelper
             using var memory = new MemoryStream();
             resourceStream.CopyTo(memory);
             memory.Position = 0;
-            using var bitmap = new System.Drawing.Bitmap(memory);
-            var nativeHandle = bitmap.GetHicon();
+            using var source = new System.Drawing.Bitmap(memory);
+            // The shell displays notification icons at a small DPI-scaled size.
+            // Avoid retaining a full 256x256 native DIB for every codec encountered.
+            using var trayBitmap = new System.Drawing.Bitmap(source, new System.Drawing.Size(64, 64));
+            var nativeHandle = trayBitmap.GetHicon();
             try
             {
                 var borrowed = System.Drawing.Icon.FromHandle(nativeHandle);

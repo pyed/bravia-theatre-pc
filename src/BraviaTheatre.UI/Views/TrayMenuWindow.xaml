@@ -1,0 +1,140 @@
+<Window x:Class="BraviaTheatre.UI.Views.TrayMenuWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="BRAVIA Theatre PC menu"
+        ThemeMode="System"
+        Width="280"
+        SizeToContent="Height"
+        WindowStyle="None"
+        AllowsTransparency="False"
+        Background="Transparent"
+        Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+        FontFamily="Segoe UI Variable Text, Segoe UI"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        Left="-32000"
+        Top="-32000"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display">
+
+    <Window.Resources>
+        <Style x:Key="TrayMenuButton" TargetType="Button">
+            <Setter Property="Height" Value="42"/>
+            <Setter Property="Padding" Value="11,0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="RowBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="RowBorder" Property="Background"
+                                        Value="{DynamicResource SubtleFillColorSecondaryBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="RowBorder" Property="Background"
+                                        Value="{DynamicResource SubtleFillColorTertiaryBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="RowBorder" Property="BorderBrush"
+                                        Value="{DynamicResource FocusStrokeColorOuterBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border x:Name="RootBorder"
+            Background="Transparent"
+            BorderBrush="{DynamicResource SurfaceStrokeColorFlyoutBrush}"
+            BorderThickness="1"
+            CornerRadius="10"
+            Padding="4">
+        <StackPanel>
+            <TextBlock x:Name="TxtStatus"
+                       Text="BRAVIA Theatre | Connecting…"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                       FontSize="12"
+                       FontWeight="SemiBold"
+                       TextTrimming="CharacterEllipsis"
+                       Margin="11,7,11,8"/>
+
+            <Border Height="1"
+                    Background="{DynamicResource DividerStrokeColorDefaultBrush}"
+                    Margin="-4,0,-4,3"/>
+
+            <Button Style="{StaticResource TrayMenuButton}"
+                    Click="OpenControls_Click"
+                    AutomationProperties.Name="Open quick controls">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="30"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="&#xE8A7;" FontFamily="Segoe Fluent Icons" FontSize="17" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="Open quick controls" FontSize="14" VerticalAlignment="Center"/>
+                </Grid>
+            </Button>
+
+            <Button Style="{StaticResource TrayMenuButton}"
+                    Click="Settings_Click"
+                    AutomationProperties.Name="Settings">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="30"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons" FontSize="17" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="Settings" FontSize="14" VerticalAlignment="Center"/>
+                </Grid>
+            </Button>
+
+            <Button Style="{StaticResource TrayMenuButton}"
+                    Click="Account_Click"
+                    AutomationProperties.Name="Sony account setup">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="30"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="&#xE77B;" FontFamily="Segoe Fluent Icons" FontSize="17" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="Sony account setup" FontSize="14" VerticalAlignment="Center"/>
+                </Grid>
+            </Button>
+
+            <Border Height="1"
+                    Background="{DynamicResource DividerStrokeColorDefaultBrush}"
+                    Margin="-4,3,-4,3"/>
+
+            <Button Style="{StaticResource TrayMenuButton}"
+                    Click="Exit_Click"
+                    AutomationProperties.Name="Exit BRAVIA Theatre PC">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="30"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="&#xE8BB;" FontFamily="Segoe Fluent Icons" FontSize="17" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="Exit" FontSize="14" VerticalAlignment="Center"/>
+                </Grid>
+            </Button>
+        </StackPanel>
+    </Border>
+</Window>

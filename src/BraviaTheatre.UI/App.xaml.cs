@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Windows;
-using System.Windows.Controls;
 using BraviaTheatre.Core.Auth;
 using BraviaTheatre.Core.Engine;
 using BraviaTheatre.Core.Models;
@@ -22,6 +21,7 @@ public partial class App : Application
     private Action<SoundbarState>? _engineStateChangedHandler;
     private long _engineGeneration;
     private FlyoutWindow? _flyout;
+    private TrayMenuWindow? _trayMenu;
     private NativeTrayIcon? _trayIcon;
     private GlobalHotkeyService? _hotkeyService;
     private SonyCredentialStore? _credentialStore;
@@ -35,10 +35,10 @@ public partial class App : Application
     private readonly object _pendingStateLock = new();
     private PendingEngineState? _pendingState;
     private int _stateDispatchPending;
+    private SoundbarState _latestState = SoundbarState.Disconnected;
+    private readonly TrayContextMenuCoordinator _trayMenuCoordinator = new();
 
     private readonly record struct PendingEngineState(long Generation, SoundbarState State);
-
-    private MenuItem? _headerMenuItem;
 
     public static string GetAppDataDir()
     {
@@ -232,42 +232,9 @@ public partial class App : Application
                 Log("Application activation requested. Showing flyout...");
                 ShowPrimarySurface();
             },
+            ContextMenuAction = ShowTrayContextMenu,
             IconRecreatedAction = () => _flyout?.RepositionIfVisible(TryGetTrayAnchor())
         };
-
-        // Right-click context menu
-        var menu = new ContextMenu();
-        menu.Opened += (_, _) => _flyout?.ResolveTrayInteraction();
-
-        _headerMenuItem = new MenuItem
-        {
-            Header = "BRAVIA Theatre | Connecting...",
-            IsEnabled = false,
-            FontWeight = FontWeights.SemiBold
-        };
-        menu.Items.Add(_headerMenuItem);
-
-        var openItem = new MenuItem { Header = "Open Quick Controls" };
-        openItem.Click += (s, e) => ShowPrimarySurface();
-        menu.Items.Add(openItem);
-
-        menu.Items.Add(new Separator());
-
-        var settingsItem = new MenuItem { Header = "Settings…" };
-        settingsItem.Click += (s, e) => OpenSettingsWindow();
-        menu.Items.Add(settingsItem);
-
-        var setupItem = new MenuItem { Header = "Sony Account Setup…" };
-        setupItem.Click += (s, e) => ShowAuthDialog(restartEngine: true);
-        menu.Items.Add(setupItem);
-
-        menu.Items.Add(new Separator());
-
-        var exitItem = new MenuItem { Header = "Exit" };
-        exitItem.Click += (s, e) => ShutdownApp();
-        menu.Items.Add(exitItem);
-
-        _trayIcon.ContextMenu = menu;
         var shown = _trayIcon.Show(IconHelper.GetTrayIcon("idle"), "BRAVIA Theatre PC");
         if (shown)
             Log("Native System Tray Icon shown.");
@@ -367,6 +334,7 @@ public partial class App : Application
         ApplyStateToUi(SoundbarState.Disconnected);
         try { _hotkeyService?.Dispose(); } catch (Exception ex) { Log($"Hotkey cleanup warning: {ex.Message}"); }
         try { _flyout?.CloseForShutdown(); } catch (Exception ex) { Log($"Flyout cleanup warning: {ex.Message}"); }
+        _flyout = null;
         try
         {
             oldEngine?.DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -380,7 +348,6 @@ public partial class App : Application
         var port = _settings.StaticPort is >= 1 and <= 65535 ? _settings.StaticPort : 55051;
         var newEngine = new BraviaEngine(credentials, host, port) { LogAction = Log };
         _engine = newEngine;
-        _flyout = new FlyoutWindow(newEngine, _settings, () => ShowAuthDialog(restartEngine: true));
         _hotkeyService = new GlobalHotkeyService(newEngine);
         ApplyHotkeySettings(showUserError: false);
         _engineStateChangedHandler = state => OnEngineStateChanged(generation, state);
@@ -425,14 +392,89 @@ public partial class App : Application
     {
         if (_authDialog != null) { _authDialog.Activate(); return; }
         if (_settingsWindow != null) { _settingsWindow.Activate(); return; }
-        _flyout?.ShowFlyout(TryGetTrayAnchor());
+        EnsureFlyout()?.ShowFlyout(TryGetTrayAnchor());
     }
 
     private void TogglePrimarySurface(TrayActivation activation)
     {
+        if (_trayMenuCoordinator.TryDefer(activation))
+        {
+            _trayMenu?.Dismiss();
+            return;
+        }
+
         if (_authDialog != null) { _authDialog.Activate(); return; }
         if (_settingsWindow != null) { _settingsWindow.Activate(); return; }
-        _flyout?.ToggleFromTray(activation, TryGetTrayAnchor());
+        EnsureFlyout()?.ToggleFromTray(activation, TryGetTrayAnchor());
+    }
+
+    private FlyoutWindow? EnsureFlyout()
+    {
+        if (_flyout != null) return _flyout;
+        if (_engine == null || _isShuttingDown) return null;
+
+        var flyout = new FlyoutWindow(
+            _engine,
+            _settings,
+            () => ShowAuthDialog(restartEngine: true));
+        flyout.UpdateState(_latestState);
+        _flyout = flyout;
+        return flyout;
+    }
+
+    private void ShowTrayContextMenu()
+    {
+        if (_isShuttingDown) return;
+        if (_trayMenu?.IsVisible == true)
+        {
+            _trayMenu.Activate();
+            return;
+        }
+
+        _flyout?.ResolveTrayInteraction();
+        var menu = EnsureTrayMenu();
+        _trayMenuCoordinator.Open();
+        menu.UpdateState(_latestState);
+
+        try
+        {
+            menu.ShowMenu(TryGetTrayAnchor());
+        }
+        catch
+        {
+            _trayMenuCoordinator.Close();
+            try { menu.Dismiss(); } catch { }
+            throw;
+        }
+    }
+
+    private TrayMenuWindow EnsureTrayMenu()
+    {
+        if (_trayMenu != null) return _trayMenu;
+
+        var menu = new TrayMenuWindow(
+            ShowPrimarySurface,
+            OpenSettingsWindow,
+            () => ShowAuthDialog(restartEngine: true),
+            ShutdownApp);
+        menu.Dismissed += (_, _) => OnTrayMenuDismissed();
+        _trayMenu = menu;
+        return menu;
+    }
+
+    private void OnTrayMenuDismissed()
+    {
+        var pendingActivation = _trayMenuCoordinator.Close();
+        if (pendingActivation is { } activation && !_isShuttingDown)
+        {
+            Dispatcher.BeginInvoke(
+                () => TogglePrimarySurface(activation),
+                System.Windows.Threading.DispatcherPriority.Input);
+        }
+        else
+        {
+            _trayIcon?.RestoreTrayFocus();
+        }
     }
 
     private PixelRect? TryGetTrayAnchor()
@@ -496,15 +538,14 @@ public partial class App : Application
 
     private void ApplyStateToUi(SoundbarState state)
     {
+        _latestState = state;
         var presentation = SoundbarUiPresentationFactory.Create(state);
         if (_trayIcon != null)
         {
             _trayIcon.UpdateIcon(IconHelper.GetTrayIcon(state.CodecBadgeKind), presentation.TrayTooltip);
         }
 
-        if (_headerMenuItem != null)
-            _headerMenuItem.Header = presentation.TrayMenuHeader;
-
+        _trayMenu?.UpdateState(state);
         _flyout?.UpdateState(state);
     }
 
@@ -530,6 +571,7 @@ public partial class App : Application
 
         try { _authDialog?.Close(); } catch { }
         try { _settingsWindow?.Close(); } catch { }
+        try { _trayMenu?.CloseForShutdown(); } catch { }
         try { _hotkeyService?.Dispose(); } catch (Exception ex) { Log($"Hotkey cleanup warning: {ex.Message}"); }
         try { InvalidateEngineState(_engine); } catch { }
         try
@@ -553,6 +595,7 @@ public partial class App : Application
         _hotkeyService = null;
         _engine = null;
         _flyout = null;
+        _trayMenu = null;
         _trayIcon = null;
         _singleInstanceMutex = null;
         _ownsSingleInstanceMutex = false;
