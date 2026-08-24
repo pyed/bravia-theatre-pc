@@ -1,4 +1,5 @@
 using System;
+using BraviaTheatre.Core.Models;
 
 namespace BraviaTheatre.UI.Services;
 
@@ -264,4 +265,50 @@ internal sealed class FlyoutTransitionController
 
     private FlyoutTransition NewTransition(FlyoutPresentationState target) =>
         new(++_generation, target);
+}
+
+internal readonly record struct SoundbarUiPresentation(
+    bool ShowAuthenticationPrompt,
+    bool ControlsEnabled,
+    string TrayTooltip,
+    string TrayMenuHeader);
+
+internal static class SoundbarUiPresentationFactory
+{
+    public static SoundbarUiPresentation Create(SoundbarState state)
+    {
+        if (state.AuthRequired)
+        {
+            return new SoundbarUiPresentation(
+                ShowAuthenticationPrompt: true,
+                ControlsEnabled: false,
+                TrayTooltip: "BRAVIA Theatre PC • Sony account sign-in required",
+                TrayMenuHeader: "BRAVIA Theatre | Sony account sign-in required");
+        }
+
+        if (!state.Connected)
+        {
+            return new SoundbarUiPresentation(
+                ShowAuthenticationPrompt: false,
+                ControlsEnabled: false,
+                TrayTooltip: "BRAVIA Theatre PC • Disconnected — retrying...",
+                TrayMenuHeader: "BRAVIA Theatre | Disconnected — retrying...");
+        }
+
+        var deviceName = state.DeviceName ?? "BRAVIA Theatre";
+        if (!state.Power)
+        {
+            return new SoundbarUiPresentation(
+                ShowAuthenticationPrompt: false,
+                ControlsEnabled: false,
+                TrayTooltip: $"{deviceName} • Standby",
+                TrayMenuHeader: "Standby");
+        }
+
+        return new SoundbarUiPresentation(
+            ShowAuthenticationPrompt: false,
+            ControlsEnabled: true,
+            TrayTooltip: $"{deviceName} • {state.HumanCodec} • Vol: {state.Volume}{(state.Mute ? " (Muted)" : "")}",
+            TrayMenuHeader: $"{state.HumanCodec} | Vol: {state.Volume}");
+    }
 }

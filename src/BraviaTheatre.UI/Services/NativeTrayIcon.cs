@@ -29,7 +29,10 @@ public sealed class NativeTrayIcon : IDisposable
     private const int NIF_ICON = 0x00000002;
     private const int NIF_TIP = 0x00000004;
     private const int NIF_GUID = 0x00000020;
-    private const int FullFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_GUID;
+    // Version 4 suppresses the shell tooltip unless NIF_SHOWTIP is requested.
+    private const int NIF_SHOWTIP = 0x00000080;
+    internal const int PresentationFlags =
+        NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_GUID | NIF_SHOWTIP;
     private static readonly Guid TrayGuid = new("86AFAF46-103B-41C8-BBA9-7A0B802BFB0B");
 
     internal enum TrayCallbackAction
@@ -104,6 +107,7 @@ public sealed class NativeTrayIcon : IDisposable
     private bool _usesVersion4;
     private bool _hasPresentation;
     private bool _disposed;
+    private readonly TrayContextMenuCoordinator _contextMenuCoordinator = new();
     private DispatcherTimer? _explorerRecoveryTimer;
     private int _explorerRecoveryAttempts;
 
@@ -135,7 +139,7 @@ public sealed class NativeTrayIcon : IDisposable
             cbSize = Marshal.SizeOf<NOTIFYICONDATA>(),
             hWnd = _hwnd,
             uID = 1001,
-            uFlags = FullFlags,
+            uFlags = PresentationFlags,
             uCallbackMessage = WM_TRAYICON,
             szTip = "BRAVIA Theatre PC",
             guidItem = TrayGuid
@@ -177,7 +181,7 @@ public sealed class NativeTrayIcon : IDisposable
     private void SetPresentation(Icon icon, string tooltip)
     {
         _hasPresentation = true;
-        _nid.uFlags = FullFlags;
+        _nid.uFlags = PresentationFlags;
         _nid.hIcon = icon.Handle;
         _nid.szTip = string.IsNullOrEmpty(tooltip)
             ? "BRAVIA Theatre PC"
@@ -186,7 +190,7 @@ public sealed class NativeTrayIcon : IDisposable
 
     private bool Add()
     {
-        _nid.uFlags = FullFlags;
+        _nid.uFlags = PresentationFlags;
         if (!Shell_NotifyIcon(NIM_ADD, ref _nid))
         {
             _isAdded = false;
@@ -204,7 +208,7 @@ public sealed class NativeTrayIcon : IDisposable
 
     private bool Modify()
     {
-        _nid.uFlags = FullFlags;
+        _nid.uFlags = PresentationFlags;
         if (Shell_NotifyIcon(NIM_MODIFY, ref _nid)) return true;
         LogAction?.Invoke($"Tray icon update failed (Win32 error {Marshal.GetLastWin32Error()}).");
         return false;
@@ -224,10 +228,7 @@ public sealed class NativeTrayIcon : IDisposable
                         : TrayActivationKind.Mouse,
                     _usesVersion4 ? DecodeCallbackPoint(wParam) : null,
                     unchecked((uint)GetMessageTime()));
-                if (ToggleAction != null)
-                    ToggleAction.Invoke(activation);
-                else
-                    LeftClickAction?.Invoke();
+                HandleToggle(activation);
                 handled = true;
             }
             else if (action == TrayCallbackAction.ContextMenu)
@@ -276,11 +277,31 @@ public sealed class NativeTrayIcon : IDisposable
             unchecked((short)((packed >> 16) & 0xffff)));
     }
 
+    private void HandleToggle(TrayActivation activation)
+    {
+        if (_contextMenuCoordinator.TryDefer(activation))
+        {
+            if (ContextMenu?.IsOpen == true)
+                ContextMenu.IsOpen = false;
+            return;
+        }
+
+        InvokeToggle(activation);
+    }
+
+    private void InvokeToggle(TrayActivation activation)
+    {
+        if (ToggleAction != null)
+            ToggleAction.Invoke(activation);
+        else
+            LeftClickAction?.Invoke();
+    }
+
     private void ShowContextMenu()
     {
         var menu = ContextMenu;
         if (menu == null) return;
-        if (menu.IsOpen) return;
+        if (menu.IsOpen || _contextMenuCoordinator.IsOpen) return;
         SetForegroundWindow(_hwnd);
         menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
         menu.HorizontalOffset = 0;
@@ -290,9 +311,20 @@ public sealed class NativeTrayIcon : IDisposable
         onClosed = (_, _) =>
         {
             menu.Closed -= onClosed;
-            RestoreTrayFocus();
+            var pendingActivation = _contextMenuCoordinator.Close();
+            if (pendingActivation is { } activation)
+            {
+                _hwndSource.Dispatcher.BeginInvoke(
+                    () => InvokeToggle(activation),
+                    DispatcherPriority.Input);
+            }
+            else
+            {
+                RestoreTrayFocus();
+            }
         };
         menu.Closed += onClosed;
+        _contextMenuCoordinator.Open();
         menu.IsOpen = true;
     }
 
@@ -368,5 +400,33 @@ public sealed class NativeTrayIcon : IDisposable
         }
         _hwndSource.RemoveHook(WndProc);
         _hwndSource.Dispose();
+    }
+}
+
+internal sealed class TrayContextMenuCoordinator
+{
+    private TrayActivation? _pendingActivation;
+
+    public bool IsOpen { get; private set; }
+
+    public void Open()
+    {
+        IsOpen = true;
+        _pendingActivation = null;
+    }
+
+    public bool TryDefer(TrayActivation activation)
+    {
+        if (!IsOpen) return false;
+        _pendingActivation = activation;
+        return true;
+    }
+
+    public TrayActivation? Close()
+    {
+        IsOpen = false;
+        var pending = _pendingActivation;
+        _pendingActivation = null;
+        return pending;
     }
 }

@@ -1,15 +1,10 @@
 <Application x:Class="BraviaTheatre.UI.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ThemeMode="System"
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
         <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries>
-                <!-- The in-box .NET 10 Fluent theme follows Windows light/dark,
-                     accent, contrast, and control-state settings automatically. -->
-                <ResourceDictionary Source="pack://application:,,,/PresentationFramework.Fluent;component/Themes/Fluent.xaml"/>
-            </ResourceDictionary.MergedDictionaries>
-
             <Style x:Key="AccentButton"
                    TargetType="Button"
                    BasedOn="{StaticResource AccentButtonStyle}">

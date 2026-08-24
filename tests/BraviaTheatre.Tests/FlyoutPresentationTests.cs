@@ -1,9 +1,16 @@
 using BraviaTheatre.UI.Services;
+using BraviaTheatre.Core.Models;
 
 namespace BraviaTheatre.Tests;
 
 public class FlyoutPresentationTests
 {
+    [Fact]
+    public void Version4TrayIconRequestsTheStandardTooltip()
+    {
+        Assert.NotEqual(0, NativeTrayIcon.PresentationFlags & 0x00000080); // NIF_SHOWTIP
+    }
+
     [Theory]
     [InlineData(0x0400, 1)] // NIN_SELECT -> ToggleMouse
     [InlineData(0x0401, 2)] // NIN_KEYSELECT -> ToggleKeyboard
@@ -114,6 +121,37 @@ public class FlyoutPresentationTests
 
         Assert.True(reopen.Exists);
         Assert.Equal(FlyoutPresentationState.Opening, controller.State);
+    }
+
+    [Fact]
+    public void LeftClickWaitsForAnOpenContextMenuToClose()
+    {
+        var coordinator = new TrayContextMenuCoordinator();
+        var activation = new TrayActivation(
+            TrayActivationKind.Mouse,
+            new PixelPoint(1810, 1058),
+            1_250);
+
+        coordinator.Open();
+
+        Assert.True(coordinator.TryDefer(activation));
+        Assert.Equal(activation, coordinator.Close());
+        Assert.False(coordinator.IsOpen);
+        Assert.Null(coordinator.Close());
+        Assert.False(coordinator.TryDefer(activation));
+    }
+
+    [Fact]
+    public void AuthenticationFailureIsPresentedAsSignInRequiredInsteadOfOffline()
+    {
+        var presentation = SoundbarUiPresentationFactory.Create(
+            SoundbarState.Disconnected with { AuthRequired = true });
+
+        Assert.True(presentation.ShowAuthenticationPrompt);
+        Assert.False(presentation.ControlsEnabled);
+        Assert.Contains("sign-in required", presentation.TrayTooltip, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("sign-in required", presentation.TrayMenuHeader, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("retrying", presentation.TrayTooltip, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

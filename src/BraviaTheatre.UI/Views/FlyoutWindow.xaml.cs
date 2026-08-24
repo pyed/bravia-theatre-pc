@@ -26,7 +26,7 @@ public partial class FlyoutWindow : Window
     private const uint SwpNoActivate = 0x0010;
 
     private readonly BraviaEngine _engine;
-    private readonly Action _onOpenSettings;
+    private readonly Action _onAuthenticate;
     private readonly FlyoutTransitionController _presentation = new();
     private AppSettings _settings;
     private DispatcherTimer? _animationTimer;
@@ -36,7 +36,7 @@ public partial class FlyoutWindow : Window
     private uint _lastDeactivationMessageTime;
     private bool _inputMenuOpen;
     private bool _deactivatedWhileInputMenuOpen;
-    private bool _openSettingsAfterClose;
+    private bool _authenticateAfterClose;
     private bool _isUpdatingUi;
     private bool _isDraggingSlider;
     private bool _allowClose;
@@ -99,12 +99,12 @@ public partial class FlyoutWindow : Window
         public uint Flags;
     }
 
-    public FlyoutWindow(BraviaEngine engine, AppSettings settings, Action onOpenSettings)
+    public FlyoutWindow(BraviaEngine engine, AppSettings settings, Action onAuthenticate)
     {
         InitializeComponent();
         _engine = engine;
         _settings = settings;
-        _onOpenSettings = onOpenSettings;
+        _onAuthenticate = onAuthenticate;
 
         WindowBackdropService.Attach(this, WindowBackdropKind.TransientWindow);
         Deactivated += OnDeactivated;
@@ -189,7 +189,7 @@ public partial class FlyoutWindow : Window
     public void CloseForShutdown()
     {
         _allowClose = true;
-        _openSettingsAfterClose = false;
+        _authenticateAfterClose = false;
         StopAnimation();
         Close();
     }
@@ -263,9 +263,21 @@ public partial class FlyoutWindow : Window
         _isUpdatingUi = true;
         try
         {
+            var presentation = SoundbarUiPresentationFactory.Create(state);
             TxtDeviceName.Text = state.DeviceName ?? "BRAVIA Theatre";
+            AuthRequiredCard.Visibility = presentation.ShowAuthenticationPrompt
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            CodecCard.Visibility = presentation.ShowAuthenticationPrompt
+                ? Visibility.Collapsed
+                : Visibility.Visible;
 
-            if (!state.Connected)
+            if (state.AuthRequired)
+            {
+                SetBrushResource(IconPower, Shape.FillProperty, "SystemFillColorCautionBrush");
+                BtnHeaderPower.ToolTip = "Sony account sign-in required";
+            }
+            else if (!state.Connected)
             {
                 SetBrushResource(IconPower, Shape.FillProperty, "SystemFillColorCriticalBrush");
                 BtnHeaderPower.ToolTip = "Connecting / Offline";
@@ -314,7 +326,7 @@ public partial class FlyoutWindow : Window
                 TxtVolumeValue.Text = state.Volume.ToString();
             }
 
-            var connectedAndPowered = state.Connected && state.Power;
+            var connectedAndPowered = presentation.ControlsEnabled;
             BtnHeaderPower.IsEnabled = state.Connected;
             BtnInputSource.IsEnabled = connectedAndPowered;
             BtnSliderMute.IsEnabled = connectedAndPowered;
@@ -328,7 +340,9 @@ public partial class FlyoutWindow : Window
 
             AutomationProperties.SetName(
                 BtnHeaderPower,
-                !state.Connected
+                state.AuthRequired
+                    ? "Soundbar power unavailable: Sony account sign-in required"
+                    : !state.Connected
                     ? "Soundbar power: offline"
                     : state.Power ? "Soundbar power: on" : "Soundbar power: standby");
             AutomationProperties.SetName(
@@ -387,7 +401,7 @@ public partial class FlyoutWindow : Window
     private void BeginOpen(FlyoutTransition transition, PixelRect? trayAnchor)
     {
         StopAnimation();
-        _openSettingsAfterClose = false;
+        _authenticateAfterClose = false;
         _trayAnchor = trayAnchor ?? _trayAnchor;
         var wasVisible = IsVisible;
 
@@ -490,11 +504,11 @@ public partial class FlyoutWindow : Window
             RootBorder.Opacity = 0;
             Hide();
             RootBorder.Opacity = 1;
-            if (_openSettingsAfterClose && !_allowClose &&
+            if (_authenticateAfterClose && !_allowClose &&
                 !Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
             {
-                _openSettingsAfterClose = false;
-                Dispatcher.BeginInvoke(_onOpenSettings, DispatcherPriority.Background);
+                _authenticateAfterClose = false;
+                Dispatcher.BeginInvoke(_onAuthenticate, DispatcherPriority.Background);
             }
         }
     }
@@ -745,9 +759,9 @@ public partial class FlyoutWindow : Window
         menu.IsOpen = true;
     }
 
-    private void BtnSettings_Click(object sender, RoutedEventArgs e)
+    private void BtnAuthenticate_Click(object sender, RoutedEventArgs e)
     {
-        _openSettingsAfterClose = true;
+        _authenticateAfterClose = true;
         RequestClose(causedByDeactivation: false);
     }
 }

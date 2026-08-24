@@ -380,7 +380,7 @@ public partial class App : Application
         var port = _settings.StaticPort is >= 1 and <= 65535 ? _settings.StaticPort : 55051;
         var newEngine = new BraviaEngine(credentials, host, port) { LogAction = Log };
         _engine = newEngine;
-        _flyout = new FlyoutWindow(newEngine, _settings, OpenSettingsWindow);
+        _flyout = new FlyoutWindow(newEngine, _settings, () => ShowAuthDialog(restartEngine: true));
         _hotkeyService = new GlobalHotkeyService(newEngine);
         ApplyHotkeySettings(showUserError: false);
         _engineStateChangedHandler = state => OnEngineStateChanged(generation, state);
@@ -496,22 +496,14 @@ public partial class App : Application
 
     private void ApplyStateToUi(SoundbarState state)
     {
+        var presentation = SoundbarUiPresentationFactory.Create(state);
         if (_trayIcon != null)
         {
-            var tooltip = !state.Connected
-                ? "BRAVIA Theatre PC • Disconnected — retrying..."
-                : !state.Power
-                    ? $"{state.DeviceName ?? "BRAVIA Theatre"} • Standby"
-                    : $"{state.DeviceName ?? "BRAVIA Theatre"} • {state.HumanCodec} • Vol: {state.Volume}{(state.Mute ? " (Muted)" : "")}";
-            _trayIcon.UpdateIcon(IconHelper.GetTrayIcon(state.CodecBadgeKind), tooltip);
+            _trayIcon.UpdateIcon(IconHelper.GetTrayIcon(state.CodecBadgeKind), presentation.TrayTooltip);
         }
 
         if (_headerMenuItem != null)
-        {
-            _headerMenuItem.Header = !state.Connected
-                ? "BRAVIA Theatre | Disconnected — retrying..."
-                : state.Power ? $"{state.HumanCodec} | Vol: {state.Volume}" : "Standby";
-        }
+            _headerMenuItem.Header = presentation.TrayMenuHeader;
 
         _flyout?.UpdateState(state);
     }
