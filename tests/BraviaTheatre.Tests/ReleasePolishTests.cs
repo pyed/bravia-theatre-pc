@@ -44,6 +44,9 @@ public class ReleasePolishTests
                 var noteLeft = Math.Min(soundFieldNote.Data.Bounds.Left, soundFieldNoteHead.Data.Bounds.Left);
                 var noteRight = Math.Max(soundFieldNote.Data.Bounds.Right, soundFieldNoteHead.Data.Bounds.Right);
                 Assert.Equal(waveCenter, noteLeft + ((noteRight - noteLeft) / 2), precision: 3);
+                var paintedWaveBottom = soundFieldWaves.Data.Bounds.Bottom + (soundFieldWaves.StrokeThickness / 2);
+                var paintedNoteTop = soundFieldNote.Data.Bounds.Top - (soundFieldNote.StrokeThickness / 2);
+                Assert.True(paintedNoteTop - paintedWaveBottom >= 0.5);
                 Assert.True(voiceBubble.Data.Bounds.Contains(voiceNote.Data.Bounds));
                 Assert.True(voiceBubble.Data.Bounds.Contains(voiceNoteHead.Data.Bounds));
 
