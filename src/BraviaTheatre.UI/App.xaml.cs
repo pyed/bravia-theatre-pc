@@ -147,7 +147,7 @@ public partial class App : Application
                 args.Handled = true;
                 return;
             }
-            Log($"DISPATCHER UNHANDLED EXCEPTION ({args.Exception.GetType().Name}).");
+            Log($"DISPATCHER UNHANDLED EXCEPTION: {FormatExceptionForLog(args.Exception)}");
             MessageBox.Show("An application error occurred. Please try the action again.",
                 "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
@@ -223,6 +223,20 @@ public partial class App : Application
         _startupCompleted = true;
         if (trayIconShown)
             Dispatcher.BeginInvoke(new Action(ShowTrayIconGuidanceOnce));
+    }
+
+    private static string FormatExceptionForLog(Exception exception)
+    {
+        var details = new List<string>();
+        for (Exception? current = exception; current != null && details.Count < 8; current = current.InnerException)
+        {
+            var message = current.Message.Replace('\r', ' ').Replace('\n', ' ').Trim();
+            details.Add(string.IsNullOrEmpty(message)
+                ? current.GetType().Name
+                : $"{current.GetType().Name}: {message}");
+        }
+
+        return string.Join(" -> ", details);
     }
 
     private bool InitializeTray()

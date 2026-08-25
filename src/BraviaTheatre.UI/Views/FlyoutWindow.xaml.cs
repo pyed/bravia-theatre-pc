@@ -102,6 +102,12 @@ public partial class FlyoutWindow : Window
     public FlyoutWindow(BraviaEngine engine, AppSettings settings, Action onAuthenticate)
     {
         InitializeComponent();
+        // Assign the shared device limits in code. Referencing const fields through
+        // x:Static makes the compiled WPF resource fail at runtime in a single-file
+        // publish, even though the XAML compiler accepts it.
+        SliderRear.Minimum = BraviaControlRanges.MinimumRearLevel;
+        SliderRear.Maximum = BraviaControlRanges.MaximumRearLevel;
+        SliderRear.SmallChange = BraviaControlRanges.RearLevelStep;
         _engine = engine;
         _settings = settings;
         _onAuthenticate = onAuthenticate;

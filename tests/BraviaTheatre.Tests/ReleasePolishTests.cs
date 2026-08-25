@@ -1,12 +1,58 @@
+using System.Runtime.ExceptionServices;
+using System.Windows.Controls;
 using BraviaTheatre.Core.Auth;
 using BraviaTheatre.Core.Engine;
 using BraviaTheatre.Core.Models;
+using BraviaTheatre.UI.Models;
 using BraviaTheatre.UI.Services;
+using BraviaTheatre.UI.Views;
 
 namespace BraviaTheatre.Tests;
 
 public class ReleasePolishTests
 {
+    [Fact]
+    public void FlyoutCompiledXamlLoadsAndUsesSharedRearRange()
+    {
+        Exception? failure = null;
+        using var completed = new ManualResetEventSlim();
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var app = new BraviaTheatre.UI.App();
+                app.InitializeComponent();
+                using var engine = new BraviaEngine(new SonyCredentials(), "test-host");
+                var flyout = new FlyoutWindow(engine, new AppSettings(), static () => { });
+                var rearSlider = Assert.IsType<Slider>(flyout.FindName("SliderRear"));
+
+                Assert.Equal(BraviaControlRanges.MinimumRearLevel, rearSlider.Minimum);
+                Assert.Equal(BraviaControlRanges.MaximumRearLevel, rearSlider.Maximum);
+                Assert.Equal(BraviaControlRanges.RearLevelStep, rearSlider.SmallChange);
+
+                flyout.CloseForShutdown();
+                app.Shutdown();
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+            finally
+            {
+                completed.Set();
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+
+        Assert.True(
+            completed.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken),
+            "Flyout XAML load timed out.");
+        thread.Join();
+        if (failure != null)
+            ExceptionDispatchInfo.Capture(failure).Throw();
+    }
+
     [Fact]
     public async Task RearLevelUsesTheDeviceAdvertisedSignedRange()
     {
