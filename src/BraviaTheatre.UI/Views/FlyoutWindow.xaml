@@ -337,10 +337,10 @@
                                           StrokeStartLineCap="Round"
                                           StrokeEndLineCap="Round"
                                           StrokeLineJoin="Round"
-                                          Data="M13.5,11V18 M13.5,11H18V13.5"/>
+                                          Data="M12,11V18 M12,11H17V13.5"/>
                                     <Path x:Name="IconSoundFieldNoteHead"
                                           Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
-                                          Data="M13.5,18A2.5,2 0 1 1 8.5,18A2.5,2 0 1 1 13.5,18Z"/>
+                                          Data="M12,18A2.5,2 0 1 1 7,18A2.5,2 0 1 1 12,18Z"/>
                                 </Canvas>
                             </Viewbox>
                             <TextBlock Text="Sound field" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,6,0,0"/>

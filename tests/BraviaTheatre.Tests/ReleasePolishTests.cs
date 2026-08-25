@@ -37,6 +37,10 @@ public class ReleasePolishTests
                 Assert.Equal(BraviaControlRanges.RearLevelStep, rearSlider.SmallChange);
                 Assert.True(soundFieldWaves.Data.Bounds.Bottom < soundFieldNote.Data.Bounds.Bottom);
                 Assert.True(soundFieldWaves.Data.Bounds.Bottom < soundFieldNoteHead.Data.Bounds.Bottom);
+                var waveCenter = soundFieldWaves.Data.Bounds.Left + (soundFieldWaves.Data.Bounds.Width / 2);
+                var noteLeft = Math.Min(soundFieldNote.Data.Bounds.Left, soundFieldNoteHead.Data.Bounds.Left);
+                var noteRight = Math.Max(soundFieldNote.Data.Bounds.Right, soundFieldNoteHead.Data.Bounds.Right);
+                Assert.Equal(waveCenter, noteLeft + ((noteRight - noteLeft) / 2), precision: 3);
                 Assert.True(voiceBubble.Data.Bounds.Contains(voiceNote.Data.Bounds));
                 Assert.True(voiceBubble.Data.Bounds.Contains(voiceNoteHead.Data.Bounds));
 
