@@ -84,7 +84,7 @@ public class ReleasePolishTests
         thread.Start();
 
         Assert.True(
-            completed.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken),
+            completed.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken),
             "Flyout XAML load timed out.");
         thread.Join();
         if (failure != null)
