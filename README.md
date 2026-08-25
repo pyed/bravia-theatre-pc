@@ -7,15 +7,15 @@ Built with C# and .NET 10, the application communicates directly with the device
 ## Screenshots
 
 <div align="center">
-  <img src="assets/screenshots/flyout_1.png" width="31%" alt="BRAVIA Theatre PC flyout" />
-  <img src="assets/screenshots/flyout_2.png" width="31%" alt="BRAVIA Theatre PC flyout with rear-level control" />
-  <img src="assets/screenshots/flyout_3.png" width="31%" alt="BRAVIA Theatre PC compact flyout" />
+  <img src="assets/screenshots/flyout_1.png" width="31%" alt="BRAVIA Theatre PC dark flyout showing Dolby Atmos" />
+  <img src="assets/screenshots/flyout_2.png" width="31%" alt="BRAVIA Theatre PC light flyout showing DTS:X Master Audio" />
+  <img src="assets/screenshots/flyout_3.png" width="31%" alt="BRAVIA Theatre PC dark flyout showing DTS-HD Master Audio" />
 </div>
 
 ## Features
 
 - Live codec and channel display, with distinct badges for Dolby Atmos, Dolby Audio, Dolby TrueHD, DTS/DTS:X, IMAX Enhanced, LPCM/PCM, AAC, DSD, and Sony 360 Reality Audio.
-- A Windows 11 Fluent quick-controls flyout with native desktop Acrylic, system light/dark and accent colors, high-contrast support, and controls for volume, mute, input, bass, optional rear-speaker level, sound field, night mode, voice mode, and power.
+- A Windows 11 Fluent quick-controls flyout with native desktop Acrylic, system light/dark and accent colors, high-contrast support, and controls for volume, mute, input, a compact bass stepper, optional rear-speaker level, sound field, night mode, voice mode, and power.
 - Configurable global shortcuts, registered atomically so a conflicting shortcut cannot leave a partial hotkey setup.
 - Embedded Sony OAuth sign-in with PKCE and callback-state verification, a manual browser fallback, explicit device selection when an account contains multiple compatible devices, and a temporary browser profile that is removed after sign-in closes.
 - Windows user-scoped credential protection using DPAPI. Sony cloud access and refresh tokens are not persisted.

@@ -7,8 +7,6 @@ Based on official brand assets and Sony Connect app UI:
 
 Outputs:
   assets/icons/<kind>.png   (256x256 master, RGBA)
-  assets/icons/lpcm.png     (alias for pcm.png)
-  assets/icons/_preview.png (contact sheet at 128/64/32/24/16)
 """
 
 from __future__ import annotations
@@ -72,16 +70,6 @@ def _place_mark(tile: Image.Image, mark_img: Image.Image, box_w: int, box_h: int
     return tile
 
 
-def checker(size: int, sq: int = 16) -> Image.Image:
-    base = Image.new("RGBA", (size, size), (235, 235, 235, 255))
-    d = ImageDraw.Draw(base)
-    for y in range(0, size, sq):
-        for x in range(0, size, sq):
-            if (x // sq + y // sq) % 2:
-                d.rectangle([x, y, x + sq - 1, y + sq - 1], fill=(205, 205, 205, 255))
-    return base
-
-
 def main() -> None:
     # Colors
     DARK_DTS     = (22, 22, 22, 255)     # Sleek Dark Graphite #161616 (Sony App DTS style)
@@ -133,14 +121,14 @@ def main() -> None:
     _place_mark(t_imax, imax_raw, 215, 60, center_y=MASTER // 2, color=(255, 255, 255, 255))
     badges["imax"] = t_imax
 
-    # 6. pcm / lpcm
-    t_pcm = _rounded_tile(MASTER, SLATE_PCM)
-    d = ImageDraw.Draw(t_pcm)
+    # 6. lpcm
+    t_lpcm = _rounded_tile(MASTER, SLATE_PCM)
+    d = ImageDraw.Draw(t_lpcm)
     f = _fit_font("LPCM", int(MASTER * 0.84), 64, min_size=18)
     bb = f.getbbox("LPCM")
     tw, th = bb[2] - bb[0], bb[3] - bb[1]
     d.text((MASTER // 2 - tw // 2 - bb[0], MASTER // 2 - th // 2 - bb[1]), "LPCM", font=f, fill=(255, 255, 255, 255))
-    badges["pcm"] = t_pcm
+    badges["lpcm"] = t_lpcm
 
     # 7. aac
     t_aac = _rounded_tile(MASTER, CHARCOAL_AAC)
@@ -182,27 +170,6 @@ def main() -> None:
         out = os.path.join(HERE, f"{name}.png")
         img.save(out)
         print("wrote", out, img.size)
-        if name == "pcm":
-            lpcm_out = os.path.join(HERE, "lpcm.png")
-            img.save(lpcm_out)
-            print("wrote", lpcm_out, img.size)
-
-    # Contact sheet preview
-    sizes = [128, 64, 32, 24, 16]
-    pad = 8
-    cols = len(sizes)
-    rows = len(badges)
-    sheet = Image.new("RGBA", (cols * (140 + pad), rows * (140 + pad)), (250, 250, 250, 255))
-    for r, (name, master_img) in enumerate(badges.items()):
-        for c, s in enumerate(sizes):
-            cell = checker(140)
-            img = master_img.resize((s, s), Image.LANCZOS)
-            cell.alpha_composite(img, ((140 - s) // 2, (140 - s) // 2))
-            sheet.alpha_composite(cell, (c * (140 + pad) + pad, r * (140 + pad) + pad))
-
-    prev = os.path.join(HERE, "_preview.png")
-    sheet.save(prev)
-    print("wrote", prev, sheet.size)
 
 
 if __name__ == "__main__":

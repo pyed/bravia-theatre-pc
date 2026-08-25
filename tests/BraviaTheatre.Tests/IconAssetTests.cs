@@ -11,7 +11,7 @@ public class IconAssetTests
     [
         "atmos_truehd", "atmos", "truehd", "ddplus", "dd",
         "dtsx", "dtshd", "dts", "imax", "lpcm", "aac", "dsd",
-        "360ra", "idle", "check"
+        "360ra", "idle"
     ];
 
     [Fact]
@@ -59,10 +59,7 @@ public class IconAssetTests
         {
             var data = new TheoryData<string>();
             foreach (var iconName in RuntimeIconNames)
-            {
-                if (!string.Equals(iconName, "check", StringComparison.Ordinal))
-                    data.Add(iconName);
-            }
+                data.Add(iconName);
             return data;
         }
     }

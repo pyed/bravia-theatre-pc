@@ -1,7 +1,7 @@
 # Tray Icon Assets & Custom Overrides
 #
-# Every codec state has a crisp, pre-built 256x256 master icon and a procedural
-# badge fallback generated with Pillow.
+# Every codec state has a crisp, pre-built 256x256 master icon. The top-level
+# PNGs are linked directly into the WPF application as runtime resources.
 #
 # Custom artwork dropped into this folder will automatically take priority:
 #
@@ -14,7 +14,7 @@
 #   dtshd.png         -> DTS-HD family (dts_hd_master_audio, dts_hd_high_resolution)
 #   dts.png           -> Standard DTS family (dts, dts_es_*, dts_96_24, dts_express)
 #   imax.png          -> IMAX Enhanced DTS (dts_x_imax, imax_dts_x, imax_dts)
-#   pcm.png / lpcm.png-> Uncompressed LPCM / Multichannel PCM
+#   lpcm.png          -> Uncompressed LPCM / Multichannel PCM
 #   aac.png           -> MPEG-2 / MPEG-4 AAC
 #   dsd.png           -> Direct Stream Digital
 #   360ra.png         -> Sony 360 Reality Audio
@@ -22,4 +22,4 @@
 #
 # Recommended source size: 256x256 RGBA PNG.
 # Run `python3 build.py` from this folder to regenerate all master assets from raw/.
-# These top-level PNGs are linked directly into the WPF application as its runtime resources.
+# The raw source marks and build script are retained so the shipped badge set can be reproduced.
