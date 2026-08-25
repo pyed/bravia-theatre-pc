@@ -70,6 +70,7 @@ public partial class App : Application
     }
 
     private static readonly object _logLock = new();
+    private static DateTime _lastLogMaintenanceDate = DateTime.MinValue;
 
     public static void Log(string message, AppLogLevel level)
     {
@@ -79,23 +80,16 @@ public partial class App : Application
         {
             try
             {
-                var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [{level}] {message}";
-                var logPath = Path.Combine(GetAppDataDir(), "bravia_csharp.log");
-
-                if (File.Exists(logPath) && new FileInfo(logPath).Length > 2 * 1024 * 1024)
+                var now = DateTime.Now;
+                var appDataDirectory = GetAppDataDir();
+                if (_lastLogMaintenanceDate != now.Date)
                 {
-                    try
-                    {
-                        var oldPath = Path.Combine(GetAppDataDir(), "bravia_csharp.log.old");
-                        if (File.Exists(oldPath)) File.Delete(oldPath);
-                        File.Move(logPath, oldPath);
-                    }
-                    catch { }
+                    DailyLogFile.DeleteExpiredFiles(appDataDirectory, now);
+                    _lastLogMaintenanceDate = now.Date;
                 }
 
-                using var stream = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-                using var writer = new StreamWriter(stream);
-                writer.WriteLine(line);
+                var line = $"[{now:yyyy-MM-dd HH:mm:ss.fff}] [{level}] {message}";
+                DailyLogFile.AppendLine(appDataDirectory, now, line);
             }
             catch
             {
@@ -176,6 +170,21 @@ public partial class App : Application
             return;
         }
 
+        WebViewProfileService.DeleteStaleProfiles(GetAppDataDir());
+        try
+        {
+            var now = DateTime.Now;
+            lock (_logLock)
+            {
+                DailyLogFile.DeleteExpiredFiles(GetAppDataDir(), now);
+                _lastLogMaintenanceDate = now.Date;
+            }
+        }
+        catch
+        {
+            // Logging must never prevent application startup.
+        }
+
         _settings = AppSettings.Load(out var settingsWarning);
         SetLogLevel(_settings.LogLevel);
         if (!string.IsNullOrWhiteSpace(settingsWarning))
@@ -221,7 +230,7 @@ public partial class App : Application
         Log("Initializing Native System Tray Icon...");
         _trayIcon = new NativeTrayIcon
         {
-            LogAction = message => Log(message, AppLogLevel.Info),
+            LogAction = message => Log(message, AppLogLevel.Critical),
             ToggleAction = activation =>
             {
                 Log("Tray activated. Toggling flyout...");

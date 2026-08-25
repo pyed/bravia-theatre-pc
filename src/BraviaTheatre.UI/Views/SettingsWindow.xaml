@@ -3,10 +3,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Settings — BRAVIA Theatre PC"
         ThemeMode="System"
-        Width="540"
-        Height="720"
-        MinWidth="500"
-        MinHeight="560"
+        Width="860"
+        Height="650"
+        MinWidth="760"
+        MinHeight="570"
         WindowStyle="SingleBorderWindow"
         AllowsTransparency="False"
         Background="Transparent"
@@ -19,15 +19,25 @@
         TextOptions.TextFormattingMode="Display">
 
     <Window.Resources>
+        <Style x:Key="PageTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="24"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+
         <Style x:Key="SectionHeading" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontSize" Value="14"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Margin" Value="2,0,0,8"/>
         </Style>
 
+        <Style x:Key="RowTitle" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
         <Style x:Key="HotkeyBox" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
             <Setter Property="Height" Value="32"/>
-            <Setter Property="Width" Value="174"/>
+            <Setter Property="Width" Value="184"/>
             <Setter Property="FontFamily" Value="Cascadia Mono, Consolas"/>
             <Setter Property="FontSize" Value="11"/>
             <Setter Property="TextAlignment" Value="Center"/>
@@ -35,230 +45,410 @@
             <Setter Property="IsReadOnly" Value="True"/>
             <Setter Property="ToolTip" Value="Select and press the shortcut you want to use"/>
         </Style>
+
+        <Style x:Key="NavigationTabItem" TargetType="TabItem">
+            <Setter Property="Height" Value="44"/>
+            <Setter Property="Margin" Value="8,2"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="NavBackground"
+                                Background="Transparent"
+                                CornerRadius="5">
+                            <Grid>
+                                <Border x:Name="SelectionIndicator"
+                                        Width="3"
+                                        Height="16"
+                                        Margin="3,0,0,0"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Center"
+                                        CornerRadius="2"
+                                        Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                        Visibility="Collapsed"/>
+                                <ContentPresenter Margin="12,0,8,0"
+                                                  ContentSource="Header"
+                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="NavBackground" Property="Background"
+                                        Value="{DynamicResource SubtleFillColorSecondaryBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="NavBackground" Property="Background"
+                                        Value="{DynamicResource SubtleFillColorTertiaryBrush}"/>
+                                <Setter TargetName="SelectionIndicator" Property="Visibility" Value="Visible"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.55"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="NavigationTabControl" TargetType="TabControl">
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="TabStripPlacement" Value="Left"/>
+            <Setter Property="ItemContainerStyle" Value="{StaticResource NavigationTabItem}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="196"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="0,0,1,0">
+                                <TabPanel IsItemsHost="True"
+                                          Margin="0,14,0,0"
+                                          KeyboardNavigation.TabNavigation="Local"/>
+                            </Border>
+                            <ContentPresenter x:Name="PART_SelectedContentHost"
+                                              Grid.Column="1"
+                                              ContentSource="SelectedContent"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Border Background="{DynamicResource LayerOnMicaBaseAltFillColorDefaultBrush}">
-        <Grid Margin="24,20,24,20">
+        <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="78"/>
                 <RowDefinition Height="*"/>
-                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="64"/>
             </Grid.RowDefinitions>
 
-            <StackPanel Margin="0,0,0,20">
-                <TextBlock Text="Settings" FontSize="28" FontWeight="SemiBold"/>
-                <TextBlock x:Name="TxtAppVersion"
-                           Text="BRAVIA Theatre PC"
-                           Style="{StaticResource CaptionText}"
-                           Margin="0,4,0,0"/>
-            </StackPanel>
-
-            <ScrollViewer Grid.Row="1"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled"
-                          Margin="0,0,0,20">
-                <StackPanel Margin="0,0,10,0">
-                    <TextBlock Text="General" Style="{StaticResource SectionHeading}"/>
-                    <Border Style="{StaticResource SettingsCard}" Margin="0,0,0,20">
-                        <StackPanel>
-                            <CheckBox x:Name="ChkStartWithWindows"
-                                      Content="Start automatically with Windows"
-                                      Margin="0,2,0,10"/>
-                            <CheckBox x:Name="ChkShowRearSpeaker"
-                                      Content="Show rear speaker level control (SA-RS3S / SA-RS5)"
-                                      Margin="0,0,0,12"/>
-
-                            <Separator Margin="0,2,0,12"/>
-
-                            <DockPanel LastChildFill="True" Margin="0,0,0,12">
-                                <Button DockPanel.Dock="Right"
-                                        Content="Taskbar settings"
-                                        Padding="12,5"
-                                        Margin="14,0,0,0"
-                                        Click="BtnOpenTaskbarSettings_Click"/>
-                                <StackPanel>
-                                    <TextBlock Text="Keep the tray icon visible" FontWeight="SemiBold"/>
-                                    <TextBlock Text="Windows controls this placement under Other system tray icons."
-                                               Style="{StaticResource CaptionText}"
-                                               Margin="0,3,0,0"/>
-                                </StackPanel>
-                            </DockPanel>
-
-                            <Separator Margin="0,0,0,12"/>
-
-                            <TextBlock Text="Connection override" FontWeight="SemiBold"/>
-                            <TextBlock Text="Leave host empty for automatic discovery. Saving a change reconnects the controller."
-                                       Style="{StaticResource CaptionText}"
-                                       Margin="0,3,0,10"/>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="96"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBox x:Name="TxtStaticHost"
-                                         Grid.Column="0"
-                                         Height="32"
-                                         Margin="0,0,8,0"
-                                         Padding="8,2"
-                                         VerticalContentAlignment="Center"
-                                         ToolTip="Optional soundbar hostname or IP address"
-                                         AutomationProperties.Name="Static soundbar host"/>
-                                <TextBox x:Name="TxtStaticPort"
-                                         Grid.Column="1"
-                                         Height="32"
-                                         Padding="8,2"
-                                         VerticalContentAlignment="Center"
-                                         ToolTip="Connection port"
-                                         AutomationProperties.Name="Soundbar port"/>
-                            </Grid>
-                        </StackPanel>
-                    </Border>
-
-                    <DockPanel Margin="2,0,0,8">
-                        <Button DockPanel.Dock="Right"
-                                Content="Reset defaults"
-                                Padding="10,4"
-                                Click="BtnResetHotkeys_Click"/>
-                        <TextBlock Text="Keyboard shortcuts" Style="{StaticResource SectionHeading}" Margin="0" VerticalAlignment="Center"/>
-                    </DockPanel>
-                    <Border Style="{StaticResource SettingsCard}" Margin="0,0,0,20">
-                        <StackPanel>
-                            <CheckBox x:Name="ChkEnableGlobalHotkeys"
-                                      Content="Enable global hotkeys"
-                                      FontWeight="SemiBold"
-                                      Margin="0,0,0,12"/>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                </Grid.RowDefinitions>
-
-                                <TextBlock Grid.Row="0" Text="Volume up" VerticalAlignment="Center"/>
-                                <TextBox x:Name="TxtHotkeyVolUp" Grid.Row="0" Grid.Column="1"
-                                         Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-                                         AutomationProperties.Name="Volume up shortcut"/>
-                                <TextBlock Grid.Row="1" Text="Volume down" VerticalAlignment="Center"/>
-                                <TextBox x:Name="TxtHotkeyVolDown" Grid.Row="1" Grid.Column="1"
-                                         Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-                                         AutomationProperties.Name="Volume down shortcut"/>
-                                <TextBlock Grid.Row="2" Text="Toggle mute" VerticalAlignment="Center"/>
-                                <TextBox x:Name="TxtHotkeyMute" Grid.Row="2" Grid.Column="1"
-                                         Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-                                         AutomationProperties.Name="Toggle mute shortcut"/>
-                                <TextBlock Grid.Row="3" Text="Toggle sound field" VerticalAlignment="Center"/>
-                                <TextBox x:Name="TxtHotkeySoundField" Grid.Row="3" Grid.Column="1"
-                                         Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-                                         AutomationProperties.Name="Toggle sound field shortcut"/>
-                                <TextBlock Grid.Row="4" Text="Toggle voice mode" VerticalAlignment="Center"/>
-                                <TextBox x:Name="TxtHotkeyVoiceMode" Grid.Row="4" Grid.Column="1"
-                                         Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-                                         AutomationProperties.Name="Toggle voice mode shortcut"/>
-                                <TextBlock Grid.Row="5" Text="Toggle night mode" VerticalAlignment="Center"/>
-                                <TextBox x:Name="TxtHotkeyNightMode" Grid.Row="5" Grid.Column="1"
-                                         Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-                                         AutomationProperties.Name="Toggle night mode shortcut"/>
-                            </Grid>
-                        </StackPanel>
-                    </Border>
-
-                    <TextBlock Text="Logging and diagnostics" Style="{StaticResource SectionHeading}"/>
-                    <Border Style="{StaticResource SettingsCard}" Margin="0,0,0,20">
-                        <StackPanel>
-                            <DockPanel Margin="0,0,0,14">
-                                <ComboBox x:Name="CboLogLevel" DockPanel.Dock="Right"
-                                          Width="132" Height="32" Margin="14,0,0,0"
-                                          AutomationProperties.Name="Logging level">
-                                    <ComboBoxItem Content="Critical" Tag="Critical" ToolTip="Only errors and crashes"/>
-                                    <ComboBoxItem Content="Info" Tag="Info" ToolTip="Connection milestones and errors"/>
-                                    <ComboBoxItem Content="Verbose" Tag="Verbose" ToolTip="Full diagnostic details"/>
-                                </ComboBox>
-                                <StackPanel>
-                                    <TextBlock Text="Logging level" FontWeight="SemiBold"/>
-                                    <TextBlock Text="Critical keeps routine logging minimal."
-                                               Style="{StaticResource CaptionText}"
-                                               Margin="0,3,0,0"/>
-                                </StackPanel>
-                            </DockPanel>
-
-                            <Separator Margin="0,0,0,12"/>
-
-                            <DockPanel>
-                                <Button DockPanel.Dock="Right"
-                                        Content="Open folder"
-                                        Padding="12,5"
-                                        Margin="14,0,0,0"
-                                        Click="BtnOpenLogFolder_Click"/>
-                                <StackPanel>
-                                    <TextBlock Text="Log file" FontWeight="SemiBold"/>
-                                    <TextBlock x:Name="TxtLogPath"
-                                               Text="%LOCALAPPDATA%\BraviaTheatrePC\bravia_csharp.log"
-                                               Style="{StaticResource CaptionText}"
-                                               FontFamily="Cascadia Mono, Consolas"
-                                               FontSize="10.5"
-                                               Margin="0,3,0,0"/>
-                                </StackPanel>
-                            </DockPanel>
-                        </StackPanel>
-                    </Border>
-
-                    <TextBlock Text="Sony account" Style="{StaticResource SectionHeading}"/>
-                    <Border Style="{StaticResource SettingsCard}" Margin="0,0,0,20">
-                        <DockPanel>
-                            <Button DockPanel.Dock="Right"
-                                    Content="Re-authenticate"
-                                    Padding="12,5"
-                                    Margin="14,0,0,0"
-                                    Click="BtnReAuth_Click"/>
-                            <StackPanel>
-                                <TextBlock Text="Account credentials" FontWeight="SemiBold"/>
-                                <TextBlock Text="Sign in again or pair another compatible device."
-                                           Style="{StaticResource CaptionText}"
-                                           Margin="0,3,0,0"/>
-                            </StackPanel>
-                        </DockPanel>
-                    </Border>
-
-                    <TextBlock Text="About" Style="{StaticResource SectionHeading}"/>
-                    <Border Style="{StaticResource SettingsCard}">
-                        <DockPanel>
-                            <Button DockPanel.Dock="Right"
-                                    Content="GitHub releases"
-                                    Padding="12,5"
-                                    Margin="14,0,0,0"
-                                    Click="BtnCheckUpdates_Click"/>
-                            <StackPanel>
-                                <TextBlock Text="Updates and source code" FontWeight="SemiBold"/>
-                                <TextBlock Text="Review releases and project information on GitHub."
-                                           Style="{StaticResource CaptionText}"
-                                           Margin="0,3,0,0"/>
-                            </StackPanel>
-                        </DockPanel>
-                    </Border>
+            <Grid Margin="24,0">
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Settings" FontSize="28" FontWeight="SemiBold"/>
+                    <TextBlock Text="BRAVIA Theatre PC preferences"
+                               Style="{StaticResource CaptionText}"
+                               Margin="0,3,0,0"/>
                 </StackPanel>
-            </ScrollViewer>
+                <TextBlock x:Name="TxtAppVersion"
+                           HorizontalAlignment="Right"
+                           VerticalAlignment="Center"
+                           Style="{StaticResource CaptionText}"
+                           Text="BRAVIA Theatre PC"/>
+            </Grid>
 
-            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="Cancel"
-                        IsCancel="True"
-                        MinWidth="88"
-                        Height="34"
-                        Margin="0,0,8,0"
-                        Click="BtnCancel_Click"/>
-                <Button Content="Save"
-                        IsDefault="True"
-                        MinWidth="88"
-                        Height="34"
-                        Style="{StaticResource AccentButton}"
-                        Click="BtnSave_Click"/>
-            </StackPanel>
+            <TabControl Grid.Row="1"
+                        Style="{StaticResource NavigationTabControl}"
+                        SelectedIndex="0">
+                <TabItem AutomationProperties.Name="General">
+                    <TabItem.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons" FontSize="16"
+                                       Width="28" VerticalAlignment="Center"/>
+                            <TextBlock Text="General" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </TabItem.Header>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="28,22,28,28" MaxWidth="620" HorizontalAlignment="Left">
+                            <TextBlock Text="General" Style="{StaticResource PageTitle}"/>
+                            <TextBlock Text="Choose how the app starts, appears, and exposes optional controls."
+                                       Style="{StaticResource CaptionText}" Margin="0,4,0,22"/>
+
+                            <TextBlock Text="App behavior" Style="{StaticResource SectionHeading}"/>
+                            <Border Style="{StaticResource SettingsCard}" Margin="0,0,0,20">
+                                <StackPanel>
+                                    <CheckBox x:Name="ChkStartWithWindows"
+                                              Content="Start BRAVIA Theatre PC when I sign in"
+                                              FontWeight="SemiBold"/>
+                                    <TextBlock Text="The controller starts quietly in the system tray."
+                                               Style="{StaticResource CaptionText}" Margin="24,4,0,0"/>
+
+                                    <Separator Margin="0,14"/>
+
+                                    <DockPanel LastChildFill="True">
+                                        <Button DockPanel.Dock="Right"
+                                                Content="Taskbar settings"
+                                                Padding="12,5"
+                                                Margin="16,0,0,0"
+                                                VerticalAlignment="Center"
+                                                Click="BtnOpenTaskbarSettings_Click"/>
+                                        <StackPanel>
+                                            <TextBlock Text="Tray icon placement" Style="{StaticResource RowTitle}"/>
+                                            <TextBlock Text="Windows decides whether the icon stays next to the clock or under the hidden-icons arrow."
+                                                       Style="{StaticResource CaptionText}" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                    </DockPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="Quick controls" Style="{StaticResource SectionHeading}"/>
+                            <Border Style="{StaticResource SettingsCard}">
+                                <StackPanel>
+                                    <CheckBox x:Name="ChkShowRearSpeaker"
+                                              Content="Show rear speaker level in the flyout"
+                                              FontWeight="SemiBold"/>
+                                    <TextBlock Text="For compatible optional rear speakers. Sony exposes a relative −10 to +10 level in steps of one; 0 is neutral."
+                                               Style="{StaticResource CaptionText}" Margin="24,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <TabItem AutomationProperties.Name="Shortcuts">
+                    <TabItem.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE765;" FontFamily="Segoe Fluent Icons" FontSize="16"
+                                       Width="28" VerticalAlignment="Center"/>
+                            <TextBlock Text="Shortcuts" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </TabItem.Header>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="28,22,28,28" MaxWidth="620" HorizontalAlignment="Left">
+                            <DockPanel Margin="0,0,0,4">
+                                <Button DockPanel.Dock="Right"
+                                        Content="Reset defaults"
+                                        Padding="11,5"
+                                        Margin="16,0,0,0"
+                                        Click="BtnResetHotkeys_Click"/>
+                                <TextBlock Text="Keyboard shortcuts" Style="{StaticResource PageTitle}"/>
+                            </DockPanel>
+                            <TextBlock Text="Control the soundbar from any app. Select a shortcut field, then press the new key combination."
+                                       Style="{StaticResource CaptionText}" Margin="0,0,0,22"/>
+
+                            <Border Style="{StaticResource SettingsCard}" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <CheckBox x:Name="ChkEnableGlobalHotkeys"
+                                              Content="Enable global keyboard shortcuts"
+                                              FontWeight="SemiBold"/>
+                                    <TextBlock Text="Shortcuts remain available while the controller runs in the tray."
+                                               Style="{StaticResource CaptionText}" Margin="24,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource SettingsCard}"
+                                    IsEnabled="{Binding IsChecked, ElementName=ChkEnableGlobalHotkeys}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="44"/>
+                                        <RowDefinition Height="44"/>
+                                        <RowDefinition Height="44"/>
+                                        <RowDefinition Height="44"/>
+                                        <RowDefinition Height="44"/>
+                                        <RowDefinition Height="44"/>
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0" Text="Volume up" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtHotkeyVolUp" Grid.Row="0" Grid.Column="1"
+                                             Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                             AutomationProperties.Name="Volume up shortcut"/>
+                                    <TextBlock Grid.Row="1" Text="Volume down" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtHotkeyVolDown" Grid.Row="1" Grid.Column="1"
+                                             Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                             AutomationProperties.Name="Volume down shortcut"/>
+                                    <TextBlock Grid.Row="2" Text="Toggle mute" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtHotkeyMute" Grid.Row="2" Grid.Column="1"
+                                             Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                             AutomationProperties.Name="Toggle mute shortcut"/>
+                                    <TextBlock Grid.Row="3" Text="Toggle sound field" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtHotkeySoundField" Grid.Row="3" Grid.Column="1"
+                                             Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                             AutomationProperties.Name="Toggle sound field shortcut"/>
+                                    <TextBlock Grid.Row="4" Text="Toggle voice mode" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtHotkeyVoiceMode" Grid.Row="4" Grid.Column="1"
+                                             Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                             AutomationProperties.Name="Toggle voice mode shortcut"/>
+                                    <TextBlock Grid.Row="5" Text="Toggle night mode" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="TxtHotkeyNightMode" Grid.Row="5" Grid.Column="1"
+                                             Style="{StaticResource HotkeyBox}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                             AutomationProperties.Name="Toggle night mode shortcut"/>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <TabItem AutomationProperties.Name="Connection">
+                    <TabItem.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE968;" FontFamily="Segoe Fluent Icons" FontSize="16"
+                                       Width="28" VerticalAlignment="Center"/>
+                            <TextBlock Text="Connection" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </TabItem.Header>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="28,22,28,28" MaxWidth="620" HorizontalAlignment="Left">
+                            <TextBlock Text="Connection" Style="{StaticResource PageTitle}"/>
+                            <TextBlock Text="Use automatic discovery, or connect directly when your network requires it."
+                                       Style="{StaticResource CaptionText}" Margin="0,4,0,22"/>
+
+                            <TextBlock Text="Soundbar" Style="{StaticResource SectionHeading}"/>
+                            <Border Style="{StaticResource SettingsCard}" Margin="0,0,0,20">
+                                <StackPanel>
+                                    <TextBlock Text="Connection override" Style="{StaticResource RowTitle}"/>
+                                    <TextBlock Text="Leave host empty for automatic discovery. Saving a change reconnects the controller."
+                                               Style="{StaticResource CaptionText}" Margin="0,4,0,12"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="112"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                                            <TextBlock Text="Host or IP address" Style="{StaticResource CaptionText}" Margin="0,0,0,5"/>
+                                            <TextBox x:Name="TxtStaticHost"
+                                                     Height="34"
+                                                     Padding="8,2"
+                                                     VerticalContentAlignment="Center"
+                                                     ToolTip="Optional soundbar hostname or IP address"
+                                                     AutomationProperties.Name="Static soundbar host"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="Port" Style="{StaticResource CaptionText}" Margin="0,0,0,5"/>
+                                            <TextBox x:Name="TxtStaticPort"
+                                                     Height="34"
+                                                     Padding="8,2"
+                                                     VerticalContentAlignment="Center"
+                                                     ToolTip="Connection port"
+                                                     AutomationProperties.Name="Soundbar port"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="Sony account" Style="{StaticResource SectionHeading}"/>
+                            <Border Style="{StaticResource SettingsCard}">
+                                <DockPanel LastChildFill="True">
+                                    <Button DockPanel.Dock="Right"
+                                            Content="Sign in again"
+                                            Padding="12,5"
+                                            Margin="16,0,0,0"
+                                            VerticalAlignment="Center"
+                                            Click="BtnReAuth_Click"/>
+                                    <StackPanel>
+                                        <TextBlock Text="Account and device pairing" Style="{StaticResource RowTitle}"/>
+                                        <TextBlock Text="Use this to renew authentication or pair another compatible system. Sign-in browser data is temporary and removed when the dialog closes."
+                                                   Style="{StaticResource CaptionText}" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <TabItem AutomationProperties.Name="Diagnostics">
+                    <TabItem.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE9D9;" FontFamily="Segoe Fluent Icons" FontSize="16"
+                                       Width="28" VerticalAlignment="Center"/>
+                            <TextBlock Text="Diagnostics" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </TabItem.Header>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="28,22,28,28" MaxWidth="620" HorizontalAlignment="Left">
+                            <TextBlock Text="Diagnostics" Style="{StaticResource PageTitle}"/>
+                            <TextBlock Text="Choose how much diagnostic detail to keep and find support information."
+                                       Style="{StaticResource CaptionText}" Margin="0,4,0,22"/>
+
+                            <TextBlock Text="Logging" Style="{StaticResource SectionHeading}"/>
+                            <Border Style="{StaticResource SettingsCard}" Margin="0,0,0,20">
+                                <StackPanel>
+                                    <DockPanel Margin="0,0,0,14">
+                                        <ComboBox x:Name="CboLogLevel" DockPanel.Dock="Right"
+                                                  Width="132" Height="32" Margin="16,0,0,0"
+                                                  AutomationProperties.Name="Logging level">
+                                            <ComboBoxItem Content="Critical" Tag="Critical" ToolTip="Only errors and crashes"/>
+                                            <ComboBoxItem Content="Info" Tag="Info" ToolTip="Connection milestones and errors"/>
+                                            <ComboBoxItem Content="Verbose" Tag="Verbose" ToolTip="Full diagnostic details"/>
+                                        </ComboBox>
+                                        <StackPanel>
+                                            <TextBlock Text="Logging level" Style="{StaticResource RowTitle}"/>
+                                            <TextBlock Text="Critical keeps routine background logging minimal."
+                                                       Style="{StaticResource CaptionText}" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                    </DockPanel>
+
+                                    <Separator Margin="0,0,0,14"/>
+
+                                    <DockPanel LastChildFill="True">
+                                        <Button DockPanel.Dock="Right"
+                                                Content="Open logs"
+                                                Padding="12,5"
+                                                Margin="16,0,0,0"
+                                                VerticalAlignment="Center"
+                                                Click="BtnOpenLogFolder_Click"/>
+                                        <StackPanel>
+                                            <TextBlock Text="Today’s log file" Style="{StaticResource RowTitle}"/>
+                                            <TextBlock x:Name="TxtLogPath"
+                                                       Style="{StaticResource CaptionText}"
+                                                       FontFamily="Cascadia Mono, Consolas"
+                                                       FontSize="10.5"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"
+                                                       Margin="0,4,0,0"/>
+                                            <TextBlock Text="A new dated file is created each day; files older than 14 days are removed."
+                                                       Style="{StaticResource CaptionText}" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                    </DockPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="About" Style="{StaticResource SectionHeading}"/>
+                            <Border Style="{StaticResource SettingsCard}">
+                                <DockPanel LastChildFill="True">
+                                    <Button DockPanel.Dock="Right"
+                                            Content="GitHub releases"
+                                            Padding="12,5"
+                                            Margin="16,0,0,0"
+                                            VerticalAlignment="Center"
+                                            Click="BtnCheckUpdates_Click"/>
+                                    <StackPanel>
+                                        <TextBlock Text="BRAVIA Theatre PC" Style="{StaticResource RowTitle}"/>
+                                        <TextBlock Text="Release notes, downloads, source code, and issue reporting."
+                                                   Style="{StaticResource CaptionText}" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+            </TabControl>
+
+            <Border Grid.Row="2"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="0,1,0,0">
+                <Grid Margin="24,0">
+                    <TextBlock Text="Changes take effect when you save."
+                               Style="{StaticResource CaptionText}"
+                               VerticalAlignment="Center"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <Button Content="Cancel"
+                                IsCancel="True"
+                                MinWidth="88"
+                                Height="34"
+                                Margin="0,0,8,0"
+                                Click="BtnCancel_Click"/>
+                        <Button Content="Save"
+                                IsDefault="True"
+                                MinWidth="88"
+                                Height="34"
+                                Style="{StaticResource AccentButton}"
+                                Click="BtnSave_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
         </Grid>
     </Border>
 </Window>

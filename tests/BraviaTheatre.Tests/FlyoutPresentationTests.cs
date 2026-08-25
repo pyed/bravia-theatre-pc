@@ -11,6 +11,12 @@ public class FlyoutPresentationTests
         Assert.NotEqual(0, NativeTrayIcon.PresentationFlags & 0x00000080); // NIF_SHOWTIP
     }
 
+    [Fact]
+    public void PortableTrayIdentityIsScopedToExecutablePathAndUid()
+    {
+        Assert.Equal(0, NativeTrayIcon.PresentationFlags & 0x00000020); // NIF_GUID
+    }
+
     [Theory]
     [InlineData(0x0400, 1)] // NIN_SELECT -> ToggleMouse
     [InlineData(0x0401, 2)] // NIN_KEYSELECT -> ToggleKeyboard

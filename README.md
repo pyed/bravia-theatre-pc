@@ -17,7 +17,7 @@ Built with C# and .NET 10, the application communicates directly with the device
 - Live codec and channel display, with distinct badges for Dolby Atmos, Dolby Audio, Dolby TrueHD, DTS/DTS:X, IMAX Enhanced, LPCM/PCM, AAC, DSD, and Sony 360 Reality Audio.
 - A Windows 11 Fluent quick-controls flyout with native desktop Acrylic, system light/dark and accent colors, high-contrast support, and controls for volume, mute, input, bass, optional rear-speaker level, sound field, night mode, voice mode, and power.
 - Configurable global shortcuts, registered atomically so a conflicting shortcut cannot leave a partial hotkey setup.
-- Embedded Sony OAuth sign-in with PKCE and callback-state verification, a manual browser fallback, and explicit device selection when an account contains multiple compatible devices.
+- Embedded Sony OAuth sign-in with PKCE and callback-state verification, a manual browser fallback, explicit device selection when an account contains multiple compatible devices, and a temporary browser profile that is removed after sign-in closes.
 - Windows user-scoped credential protection using DPAPI. Sony cloud access and refresh tokens are not persisted.
 - Automatic local discovery using mDNS first, followed by a bounded subnet probe that fingerprints candidates before connecting.
 - Connection-scoped workers, health polling, command coalescing, stale-command rejection, and clean reconnect/teardown behavior.
@@ -93,7 +93,7 @@ The application validates the OAuth state before exchanging the authorization co
 
 The file is encrypted for the current Windows user with DPAPI. If protected credentials are not present, the application starts Sony account setup and creates them after successful sign-in. Do not copy credential files, callback URLs, browser network captures, or verbose logs into issues, tests, or commits.
 
-Use **Sony Account Setup** from the tray menu or **Re-authenticate** in Settings to select another account/device or replace local credentials. The existing engine is stopped before the replacement connection starts.
+Use **Sony Account Setup** from the tray menu or **Sign in again** in Settings to select another account/device or replace local credentials. The existing engine is stopped before the replacement connection starts. WebView2 stores cookies and cached resources only for the active sign-in session; its temporary profile is removed after the dialog closes and recreated if another sign-in is needed.
 
 ## Configuration and diagnostics
 
@@ -101,12 +101,12 @@ Settings are stored atomically under `%LOCALAPPDATA%\BraviaTheatrePC\settings.js
 
 - Windows startup
 - A shortcut to Windows Taskbar settings for keeping the tray icon visible
-- Optional rear-speaker controls
+- Optional rear-speaker control using Sony's relative `-10` to `+10` range (`0` is neutral)
 - Global shortcuts
 - Automatic discovery or a static host/port override
 - Critical, Info, or Verbose logging
 
-Only this current settings location is read. Logs are written under `%LOCALAPPDATA%\BraviaTheatrePC` and rotate at approximately 2 MB.
+Only this current settings location is read. Daily logs are written to `%LOCALAPPDATA%\BraviaTheatrePC\Logs\BraviaTheatrePC-YYYY-MM-DD.log`; the most recent 14 days are retained.
 
 ## Local-network security model
 

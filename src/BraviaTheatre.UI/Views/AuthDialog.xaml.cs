@@ -1,6 +1,5 @@
 using System;
 using System.Diagnostics;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -20,6 +19,7 @@ public partial class AuthDialog : Window
     private bool _isManualMode = false;
     private bool _isProcessing = false;
     private bool _isClosed;
+    private string? _webViewSessionDirectory;
 
     public AuthDialog(SonyCredentialStore credentialStore)
     {
@@ -55,13 +55,8 @@ public partial class AuthDialog : Window
             OverlayProgress.Visibility = Visibility.Visible;
             TxtProgressStatus.Text = "Loading Sony Sign-In...";
 
-            var webViewDataFolder = Path.Combine(App.GetAppDataDir(), "WebView2");
-            if (!Directory.Exists(webViewDataFolder))
-            {
-                try { Directory.CreateDirectory(webViewDataFolder); } catch { }
-            }
-
-            var env = await CoreWebView2Environment.CreateAsync(userDataFolder: webViewDataFolder);
+            _webViewSessionDirectory = WebViewProfileService.PrepareSessionDirectory(App.GetAppDataDir());
+            var env = await CoreWebView2Environment.CreateAsync(userDataFolder: _webViewSessionDirectory);
             cancellationToken.ThrowIfCancellationRequested();
             await AuthWebView.EnsureCoreWebView2Async(env);
             cancellationToken.ThrowIfCancellationRequested();
@@ -222,10 +217,14 @@ public partial class AuthDialog : Window
     {
         _isClosed = true;
         _lifetimeCts.Cancel();
+        int? browserProcessId = null;
         try
         {
             if (AuthWebView.CoreWebView2 != null)
+            {
+                browserProcessId = checked((int)AuthWebView.CoreWebView2.BrowserProcessId);
                 AuthWebView.CoreWebView2.NavigationStarting -= CoreWebView2_NavigationStarting;
+            }
             AuthWebView.NavigationCompleted -= AuthWebView_NavigationCompleted;
             AuthWebView.Dispose();
         }
@@ -234,7 +233,20 @@ public partial class AuthDialog : Window
             // The WebView may be only partially initialized.
         }
         _lifetimeCts.Dispose();
+        _ = CleanupWebViewProfileAsync(_webViewSessionDirectory, browserProcessId);
         base.OnClosed(e);
+    }
+
+    private static async Task CleanupWebViewProfileAsync(string? sessionDirectory, int? browserProcessId)
+    {
+        try
+        {
+            await WebViewProfileService.CleanupSessionAsync(sessionDirectory, browserProcessId);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"WebView2 profile cleanup warning ({ex.GetType().Name}).", App.AppLogLevel.Info);
+        }
     }
 
     private async void CoreWebView2_NavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs args)

@@ -974,7 +974,10 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
 
     public Task<bool> SetRearLevelAsync(int level)
     {
-        level = Math.Clamp(level, -10, 10);
+        level = Math.Clamp(
+            level,
+            BraviaControlRanges.MinimumRearLevel,
+            BraviaControlRanges.MaximumRearLevel);
         return Task.FromResult(TryQueueCommand(
             "sound_setting.volume.rear",
             state => !state.Power || state.RearLevel == level

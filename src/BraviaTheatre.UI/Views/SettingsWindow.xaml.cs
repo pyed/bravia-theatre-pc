@@ -53,7 +53,7 @@ public partial class SettingsWindow : Window
         }
         if (CboLogLevel.SelectedItem == null) CboLogLevel.SelectedIndex = 0;
 
-        TxtLogPath.Text = Path.Combine(App.GetAppDataDir(), "bravia_csharp.log");
+        TxtLogPath.Text = DailyLogFile.GetPath(App.GetAppDataDir(), DateTime.Now);
     }
 
     private void HotkeyBox_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -108,7 +108,8 @@ public partial class SettingsWindow : Window
     {
         try
         {
-            var folder = App.GetAppDataDir();
+            var folder = DailyLogFile.GetDirectory(App.GetAppDataDir());
+            Directory.CreateDirectory(folder);
             Process.Start(new ProcessStartInfo
             {
                 FileName = folder,

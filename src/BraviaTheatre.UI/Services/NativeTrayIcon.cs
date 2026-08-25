@@ -27,12 +27,10 @@ public sealed class NativeTrayIcon : IDisposable
     private const int NIF_MESSAGE = 0x00000001;
     private const int NIF_ICON = 0x00000002;
     private const int NIF_TIP = 0x00000004;
-    private const int NIF_GUID = 0x00000020;
     // Version 4 suppresses the shell tooltip unless NIF_SHOWTIP is requested.
     private const int NIF_SHOWTIP = 0x00000080;
     internal const int PresentationFlags =
-        NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_GUID | NIF_SHOWTIP;
-    private static readonly Guid TrayGuid = new("86AFAF46-103B-41C8-BBA9-7A0B802BFB0B");
+        NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
 
     internal enum TrayCallbackAction
     {
@@ -136,8 +134,7 @@ public sealed class NativeTrayIcon : IDisposable
             uID = 1001,
             uFlags = PresentationFlags,
             uCallbackMessage = WM_TRAYICON,
-            szTip = "BRAVIA Theatre PC",
-            guidItem = TrayGuid
+            szTip = "BRAVIA Theatre PC"
         };
     }
 
@@ -164,8 +161,7 @@ public sealed class NativeTrayIcon : IDisposable
         {
             cbSize = Marshal.SizeOf<NOTIFYICONIDENTIFIER>(),
             hWnd = _hwnd,
-            uID = _nid.uID,
-            guidItem = TrayGuid
+            uID = _nid.uID
         };
 
         if (Shell_NotifyIconGetRect(ref identifier, out var rect) != 0) return false;
@@ -287,7 +283,7 @@ public sealed class NativeTrayIcon : IDisposable
     {
         if (_disposed || !_isAdded) return;
         var focusData = _nid;
-        focusData.uFlags = NIF_GUID;
+        focusData.uFlags = 0;
         _ = Shell_NotifyIcon(NIM_SETFOCUS, ref focusData);
     }
 
@@ -349,7 +345,7 @@ public sealed class NativeTrayIcon : IDisposable
         StopExplorerRecovery();
         if (_isAdded)
         {
-            _nid.uFlags = NIF_GUID;
+            _nid.uFlags = 0;
             Shell_NotifyIcon(NIM_DELETE, ref _nid);
             _isAdded = false;
         }
