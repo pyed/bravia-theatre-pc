@@ -25,6 +25,9 @@ public class ReleasePolishTests
                 using var engine = new BraviaEngine(new SonyCredentials(), "test-host");
                 var flyout = new FlyoutWindow(engine, new AppSettings(), static () => { });
                 var rearSlider = Assert.IsType<Slider>(flyout.FindName("SliderRear"));
+                var soundFieldWaves = Assert.IsType<System.Windows.Shapes.Path>(flyout.FindName("IconSoundFieldWaves"));
+                var soundFieldNote = Assert.IsType<System.Windows.Shapes.Path>(flyout.FindName("IconSoundFieldNote"));
+                var soundFieldNoteHead = Assert.IsType<System.Windows.Shapes.Path>(flyout.FindName("IconSoundFieldNoteHead"));
                 var voiceBubble = Assert.IsType<System.Windows.Shapes.Path>(flyout.FindName("IconVoiceBubble"));
                 var voiceNote = Assert.IsType<System.Windows.Shapes.Path>(flyout.FindName("IconVoiceNote"));
                 var voiceNoteHead = Assert.IsType<System.Windows.Shapes.Path>(flyout.FindName("IconVoiceNoteHead"));
@@ -32,6 +35,8 @@ public class ReleasePolishTests
                 Assert.Equal(BraviaControlRanges.MinimumRearLevel, rearSlider.Minimum);
                 Assert.Equal(BraviaControlRanges.MaximumRearLevel, rearSlider.Maximum);
                 Assert.Equal(BraviaControlRanges.RearLevelStep, rearSlider.SmallChange);
+                Assert.True(soundFieldWaves.Data.Bounds.Bottom < soundFieldNote.Data.Bounds.Bottom);
+                Assert.True(soundFieldWaves.Data.Bounds.Bottom < soundFieldNoteHead.Data.Bounds.Bottom);
                 Assert.True(voiceBubble.Data.Bounds.Contains(voiceNote.Data.Bounds));
                 Assert.True(voiceBubble.Data.Bounds.Contains(voiceNoteHead.Data.Bounds));
 

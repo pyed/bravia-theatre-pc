@@ -321,9 +321,28 @@
                                   Click="BtnSoundField_Click"
                                   AutomationProperties.Name="Sound field">
                         <StackPanel>
-                            <Path Width="22" Height="20" Stretch="Uniform"
-                                  Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
-                                  Data="M3,9H6L10,5V19L6,15H3Z M13,8C14.8,10.2 14.8,13.8 13,16L15,17.5C17.7,14.3 17.7,9.7 15,6.5Z M17,4C21.6,8.4 21.6,15.6 17,20L19,22C24.7,16.5 24.7,7.5 19,2Z"/>
+                            <Viewbox Width="22" Height="22" Stretch="Uniform">
+                                <Canvas Width="24" Height="24">
+                                    <Path x:Name="IconSoundFieldWaves"
+                                          Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                                          StrokeThickness="1.8"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          Data="M4,10A8,8 0 0 1 20,10 M7,10A5,5 0 0 1 17,10 M10,10A2,2 0 0 1 14,10"/>
+                                    <Path x:Name="IconSoundFieldNote"
+                                          Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                                          StrokeThickness="1.8"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          Data="M13.5,11V18 M13.5,11H18V13.5"/>
+                                    <Path x:Name="IconSoundFieldNoteHead"
+                                          Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                                          Data="M13.5,18A2.5,2 0 1 1 8.5,18A2.5,2 0 1 1 13.5,18Z"/>
+                                </Canvas>
+                            </Viewbox>
                             <TextBlock Text="Sound field" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,6,0,0"/>
                             <TextBlock x:Name="TxtSoundFieldStatus" Text="On" FontSize="11" HorizontalAlignment="Center"/>
                         </StackPanel>
