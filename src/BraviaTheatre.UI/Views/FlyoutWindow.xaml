@@ -140,6 +140,18 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <Style x:Key="BassStepButton" TargetType="Button" BasedOn="{StaticResource SegmentButton}">
+            <Setter Property="MinWidth" Value="38"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorDisabledBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <!-- The root fills the HWND exactly. DWM supplies the native rounded clipping,
@@ -445,9 +457,24 @@
                                     Padding="2"
                                     HorizontalAlignment="Right">
                                 <StackPanel Orientation="Horizontal">
-                                    <Button x:Name="BtnBassMin" Content="MIN" Style="{StaticResource SegmentButton}" Click="BtnBassMin_Click"/>
-                                    <Button x:Name="BtnBassMid" Content="MID" Style="{StaticResource SegmentButton}" Click="BtnBassMid_Click"/>
-                                    <Button x:Name="BtnBassMax" Content="MAX" Style="{StaticResource SegmentButton}" Click="BtnBassMax_Click"/>
+                                    <Button x:Name="BtnBassDecrease"
+                                            Content="&#x2212;"
+                                            Style="{StaticResource BassStepButton}"
+                                            Click="BtnBassDecrease_Click"
+                                            AutomationProperties.Name="Decrease bass level"/>
+                                    <TextBlock x:Name="TxtBassLevel"
+                                               Text="MID"
+                                               Width="54"
+                                               FontSize="12"
+                                               FontWeight="SemiBold"
+                                               TextAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               AutomationProperties.Name="Current bass level: MID"/>
+                                    <Button x:Name="BtnBassIncrease"
+                                            Content="+"
+                                            Style="{StaticResource BassStepButton}"
+                                            Click="BtnBassIncrease_Click"
+                                            AutomationProperties.Name="Increase bass level"/>
                                 </StackPanel>
                             </Border>
                         </DockPanel>

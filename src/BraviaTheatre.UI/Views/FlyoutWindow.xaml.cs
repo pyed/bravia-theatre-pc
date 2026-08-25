@@ -40,6 +40,8 @@ public partial class FlyoutWindow : Window
     private bool _isUpdatingUi;
     private bool _isDraggingSlider;
     private bool _allowClose;
+    private bool _bassControlsEnabled;
+    private string _bassLevel = "mid";
 
     private static readonly Geometry SpeakerUnmutedGeometry = Geometry.Parse(
         "M2,8v8h4l6,5V3L6,8H2z M16.5,8c.9,1.1 1.5,2.5 1.5,4s-.6,2.9-1.5,4l-1.5-1.5c.6-.7 1-1.6 1-2.5s-.4-1.8-1-2.5L16.5,8z M19,5.5c1.9,1.7 3,4 3,6.5s-1.1,4.8-3,6.5l-1.5-1.5c1.5-1.3 2.5-3.1 2.5-5s-1-3.7-2.5-5L19,5.5z");
@@ -336,9 +338,6 @@ public partial class FlyoutWindow : Window
             BtnHeaderPower.IsEnabled = state.Connected;
             BtnInputSource.IsEnabled = connectedAndPowered;
             BtnSliderMute.IsEnabled = connectedAndPowered;
-            BtnBassMin.IsEnabled = connectedAndPowered;
-            BtnBassMid.IsEnabled = connectedAndPowered;
-            BtnBassMax.IsEnabled = connectedAndPowered;
             BtnSoundField.IsEnabled = connectedAndPowered;
             BtnNightMode.IsEnabled = connectedAndPowered;
             BtnVoiceMode.IsEnabled = connectedAndPowered;
@@ -356,7 +355,7 @@ public partial class FlyoutWindow : Window
                 state.Mute ? "Unmute (currently muted)" : "Mute (currently unmuted)");
 
             IconSpeaker.Data = state.Mute ? SpeakerMutedGeometry : SpeakerUnmutedGeometry;
-            UpdateBassPills(state.Bass);
+            UpdateBassStepper(state.Bass, connectedAndPowered);
 
             SliderRear.Value = state.RearLevel;
             TxtRearValue.Text = state.RearLevel > 0 ? $"+{state.RearLevel}" : state.RearLevel.ToString();
@@ -641,25 +640,43 @@ public partial class FlyoutWindow : Window
     private static void SetBrushResource(FrameworkElement element, DependencyProperty property, string resourceKey) =>
         element.SetResourceReference(property, resourceKey);
 
-    private void UpdateBassPills(string bass)
+    private void UpdateBassStepper(string bass, bool controlsEnabled)
     {
-        bass = bass.ToLowerInvariant();
-        ApplySegmentStyle(BtnBassMin, "Minimum bass", bass == "min");
-        ApplySegmentStyle(BtnBassMid, "Medium bass", bass == "mid");
-        ApplySegmentStyle(BtnBassMax, "Maximum bass", bass == "max");
+        _bassLevel = NormalizeBassLevel(bass);
+        _bassControlsEnabled = controlsEnabled;
+        var displayLevel = _bassLevel.ToUpperInvariant();
+
+        TxtBassLevel.Text = displayLevel;
+        AutomationProperties.SetName(TxtBassLevel, $"Current bass level: {displayLevel}");
+        BtnBassDecrease.IsEnabled = controlsEnabled && _bassLevel != "min";
+        BtnBassIncrease.IsEnabled = controlsEnabled && _bassLevel != "max";
+        AutomationProperties.SetName(BtnBassDecrease, $"Decrease bass level from {displayLevel}");
+        AutomationProperties.SetName(BtnBassIncrease, $"Increase bass level from {displayLevel}");
     }
 
-    private static void ApplySegmentStyle(Button button, string label, bool active)
+    internal static string StepBassLevel(string bass, int direction)
     {
-        button.Tag = active;
-        button.SetResourceReference(
-            Control.BackgroundProperty,
-            active ? "AccentFillColorDefaultBrush" : "ControlFillColorTransparentBrush");
-        button.SetResourceReference(
-            Control.ForegroundProperty,
-            active ? "TextOnAccentFillColorPrimaryBrush" : "TextFillColorSecondaryBrush");
-        AutomationProperties.SetName(button, active ? $"{label}, selected" : label);
+        var index = NormalizeBassLevel(bass) switch
+        {
+            "min" => 0,
+            "max" => 2,
+            _ => 1
+        };
+        var target = Math.Clamp(index + Math.Sign(direction), 0, 2);
+        return target switch
+        {
+            0 => "min",
+            2 => "max",
+            _ => "mid"
+        };
     }
+
+    private static string NormalizeBassLevel(string? bass) => bass?.ToLowerInvariant() switch
+    {
+        "min" => "min",
+        "max" => "max",
+        _ => "mid"
+    };
 
     private void SliderVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
@@ -689,22 +706,20 @@ public partial class FlyoutWindow : Window
 
     private void BtnSliderMute_Click(object sender, RoutedEventArgs e) => _ = _engine.ToggleMuteAsync();
 
-    private void BtnBassMin_Click(object sender, RoutedEventArgs e)
+    private void BtnBassDecrease_Click(object sender, RoutedEventArgs e)
     {
-        UpdateBassPills("min");
-        _ = _engine.SetBassAsync("min");
+        var target = StepBassLevel(_bassLevel, -1);
+        if (target == _bassLevel) return;
+        UpdateBassStepper(target, _bassControlsEnabled);
+        _ = _engine.SetBassAsync(target);
     }
 
-    private void BtnBassMid_Click(object sender, RoutedEventArgs e)
+    private void BtnBassIncrease_Click(object sender, RoutedEventArgs e)
     {
-        UpdateBassPills("mid");
-        _ = _engine.SetBassAsync("mid");
-    }
-
-    private void BtnBassMax_Click(object sender, RoutedEventArgs e)
-    {
-        UpdateBassPills("max");
-        _ = _engine.SetBassAsync("max");
+        var target = StepBassLevel(_bassLevel, 1);
+        if (target == _bassLevel) return;
+        UpdateBassStepper(target, _bassControlsEnabled);
+        _ = _engine.SetBassAsync(target);
     }
 
     private void BtnSoundField_Click(object sender, RoutedEventArgs e) => _ = _engine.ToggleSoundFieldAsync();

@@ -31,6 +31,9 @@ public class ReleasePolishTests
                 var voiceBubble = Assert.IsType<System.Windows.Shapes.Path>(flyout.FindName("IconVoiceBubble"));
                 var voiceNote = Assert.IsType<System.Windows.Shapes.Path>(flyout.FindName("IconVoiceNote"));
                 var voiceNoteHead = Assert.IsType<System.Windows.Shapes.Path>(flyout.FindName("IconVoiceNoteHead"));
+                var bassDecrease = Assert.IsType<Button>(flyout.FindName("BtnBassDecrease"));
+                var bassLevel = Assert.IsType<TextBlock>(flyout.FindName("TxtBassLevel"));
+                var bassIncrease = Assert.IsType<Button>(flyout.FindName("BtnBassIncrease"));
 
                 Assert.Equal(BraviaControlRanges.MinimumRearLevel, rearSlider.Minimum);
                 Assert.Equal(BraviaControlRanges.MaximumRearLevel, rearSlider.Maximum);
@@ -43,6 +46,24 @@ public class ReleasePolishTests
                 Assert.Equal(waveCenter, noteLeft + ((noteRight - noteLeft) / 2), precision: 3);
                 Assert.True(voiceBubble.Data.Bounds.Contains(voiceNote.Data.Bounds));
                 Assert.True(voiceBubble.Data.Bounds.Contains(voiceNoteHead.Data.Bounds));
+
+                flyout.UpdateState(new SoundbarState { Connected = true, Power = true, Bass = "min" });
+                Assert.Equal("MIN", bassLevel.Text);
+                Assert.False(bassDecrease.IsEnabled);
+                Assert.True(bassIncrease.IsEnabled);
+
+                flyout.UpdateState(new SoundbarState { Connected = true, Power = true, Bass = "mid" });
+                Assert.Equal("MID", bassLevel.Text);
+                Assert.True(bassDecrease.IsEnabled);
+                Assert.True(bassIncrease.IsEnabled);
+
+                flyout.UpdateState(new SoundbarState { Connected = true, Power = true, Bass = "max" });
+                Assert.Equal("MAX", bassLevel.Text);
+                Assert.True(bassDecrease.IsEnabled);
+                Assert.False(bassIncrease.IsEnabled);
+                Assert.Equal("min", FlyoutWindow.StepBassLevel("min", -1));
+                Assert.Equal("mid", FlyoutWindow.StepBassLevel("min", 1));
+                Assert.Equal("max", FlyoutWindow.StepBassLevel("mid", 1));
 
                 flyout.CloseForShutdown();
                 app.Shutdown();
