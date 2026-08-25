@@ -12,7 +12,7 @@ namespace BraviaTheatre.Tests;
 public class ReleasePolishTests
 {
     [Fact]
-    public void FlyoutCompiledXamlLoadsAndUsesSharedRearRange()
+    public void FlyoutCompiledXamlLoadsWithReleaseControls()
     {
         Exception? failure = null;
         using var completed = new ManualResetEventSlim();
@@ -25,10 +25,15 @@ public class ReleasePolishTests
                 using var engine = new BraviaEngine(new SonyCredentials(), "test-host");
                 var flyout = new FlyoutWindow(engine, new AppSettings(), static () => { });
                 var rearSlider = Assert.IsType<Slider>(flyout.FindName("SliderRear"));
+                var voiceBubble = Assert.IsType<System.Windows.Shapes.Path>(flyout.FindName("IconVoiceBubble"));
+                var voiceNote = Assert.IsType<System.Windows.Shapes.Path>(flyout.FindName("IconVoiceNote"));
+                var voiceNoteHead = Assert.IsType<System.Windows.Shapes.Path>(flyout.FindName("IconVoiceNoteHead"));
 
                 Assert.Equal(BraviaControlRanges.MinimumRearLevel, rearSlider.Minimum);
                 Assert.Equal(BraviaControlRanges.MaximumRearLevel, rearSlider.Maximum);
                 Assert.Equal(BraviaControlRanges.RearLevelStep, rearSlider.SmallChange);
+                Assert.True(voiceBubble.Data.Bounds.Contains(voiceNote.Data.Bounds));
+                Assert.True(voiceBubble.Data.Bounds.Contains(voiceNoteHead.Data.Bounds));
 
                 flyout.CloseForShutdown();
                 app.Shutdown();
