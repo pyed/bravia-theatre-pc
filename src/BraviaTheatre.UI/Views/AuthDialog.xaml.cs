@@ -11,7 +11,7 @@ namespace BraviaTheatre.UI.Views;
 
 public partial class AuthDialog : Window
 {
-    private readonly SonyCredentialStore _credentialStore;
+    private readonly SonyCredentialLifecycle _credentialLifecycle;
     private readonly CancellationTokenSource _lifetimeCts = new();
     private string? _codeVerifier;
     private string? _expectedState;
@@ -21,14 +21,12 @@ public partial class AuthDialog : Window
     private bool _isClosed;
     private string? _webViewSessionDirectory;
 
-    public AuthDialog(SonyCredentialStore credentialStore)
+    public AuthDialog(SonyCredentialLifecycle credentialLifecycle)
     {
         InitializeComponent();
         WindowBackdropService.Attach(this, WindowBackdropKind.MainWindow);
-        _credentialStore = credentialStore;
+        _credentialLifecycle = credentialLifecycle;
     }
-
-    public SonyCredentials? AuthenticatedCredentials { get; private set; }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
@@ -116,11 +114,14 @@ public partial class AuthDialog : Window
                 _lifetimeCts.Token,
                 SelectDeviceAsync);
 
-            if (!_credentialStore.TrySave(creds, out var saveError))
-                throw new InvalidOperationException(saveError ?? "Could not save protected Sony credentials.");
+            var installResult = await _credentialLifecycle.InstallAsync(creds, _lifetimeCts.Token);
+            if (installResult.Status != CredentialRenewalStatus.Succeeded)
+            {
+                throw new InvalidOperationException(
+                    installResult.Diagnostic ?? "Could not save protected Sony credentials.");
+            }
 
             App.Log("OAuth flow and local key exchange completed successfully.");
-            AuthenticatedCredentials = creds;
             if (_isClosed) return;
             DialogResult = true;
             Close();

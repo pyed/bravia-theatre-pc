@@ -14,6 +14,7 @@ namespace BraviaTheatre.Core.Engine;
 public sealed class BraviaEngine : IDisposable, IAsyncDisposable
 {
     private readonly record struct QueuedCommand(long Generation, string Path, object Value);
+    private static readonly TimeSpan CredentialRenewalWindow = TimeSpan.FromMinutes(5);
 
     private static readonly string[] MonitoredPaths =
     {
@@ -33,6 +34,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
     private readonly string? _configuredHost;
     private readonly int _configuredPort;
     private readonly SonyCredentials _credentials;
+    private readonly SonyCredentialLifecycle? _credentialLifecycle;
     private readonly CancellationTokenSource _cts = new();
     private readonly Func<string, int, SonyCredentials, IBraviaClient> _clientFactory;
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
@@ -44,6 +46,9 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
     private int _activeCommandDrainReaders;
     private int _maxConcurrentCommandDrainReaders;
     private long _nextConnectionGeneration;
+    private SonyCredentials? _authenticationRequiredCredentials;
+    private SonyCredentials? _refreshSuppressedCredentials;
+    private SonyCredentials? _proactiveRenewalSuppressedCredentials;
 
     private readonly Channel<QueuedCommand> _cmdChannel = Channel.CreateUnbounded<QueuedCommand>(
         new UnboundedChannelOptions
@@ -76,6 +81,16 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
     {
     }
 
+    public BraviaEngine(SonyCredentialLifecycle credentialLifecycle, string? host = null, int port = 55051)
+        : this(
+            credentialLifecycle,
+            host,
+            port,
+            static (clientHost, clientPort, clientCredentials) => new BraviaClient(clientHost, clientPort, clientCredentials),
+            static (delay, ct) => Task.Delay(delay, ct))
+    {
+    }
+
     internal BraviaEngine(
         SonyCredentials credentials,
         string? host,
@@ -84,6 +99,22 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         Func<TimeSpan, CancellationToken, Task> delayAsync)
     {
         _credentials = credentials;
+        _configuredHost = host;
+        _configuredPort = port;
+        _clientFactory = clientFactory;
+        _delayAsync = delayAsync;
+    }
+
+    internal BraviaEngine(
+        SonyCredentialLifecycle credentialLifecycle,
+        string? host,
+        int port,
+        Func<string, int, SonyCredentials, IBraviaClient> clientFactory,
+        Func<TimeSpan, CancellationToken, Task> delayAsync)
+    {
+        ArgumentNullException.ThrowIfNull(credentialLifecycle);
+        _credentialLifecycle = credentialLifecycle;
+        _credentials = new SonyCredentials();
         _configuredHost = host;
         _configuredPort = port;
         _clientFactory = clientFactory;
@@ -99,6 +130,69 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         catch
         {
             // Logging must never affect engine lifecycle or cleanup.
+        }
+    }
+
+    private SonyCredentials CurrentCredentials =>
+        _credentialLifecycle?.CurrentCredentials ?? _credentials;
+
+    private static bool IsNearingExpiry(SonyCredentials credentials) =>
+        credentials.SessionKeysExpiresAtUtc is { } expiresAt
+        && expiresAt <= DateTimeOffset.UtcNow + CredentialRenewalWindow;
+
+    private static string DescribeFailure(Exception error) => error is RpcException rpcError
+        ? $"{nameof(RpcException)} (StatusCode={rpcError.StatusCode})"
+        : error.GetType().Name;
+
+    private bool TryUseRenewalResult(
+        CredentialRenewalResult renewal,
+        ref SonyCredentials credentials,
+        ref bool authRequired,
+        bool authenticatedHandshakeRejected)
+    {
+        if (renewal.Status == CredentialRenewalStatus.Succeeded
+            && renewal.Credentials != null)
+        {
+            credentials = renewal.Credentials;
+            authRequired = false;
+            _authenticationRequiredCredentials = null;
+            _refreshSuppressedCredentials = null;
+            _proactiveRenewalSuppressedCredentials = IsNearingExpiry(credentials)
+                ? credentials
+                : null;
+            Log(credentials.SessionKeysExpiresAtUtc is { } expiresAt
+                ? $"Local session credentials renewed; expire at {expiresAt:O}."
+                : "Local session credentials renewed; Sony did not provide an expiry.");
+            return true;
+        }
+
+        switch (renewal.Status)
+        {
+            case CredentialRenewalStatus.Unavailable:
+                if (authenticatedHandshakeRejected)
+                {
+                    _authenticationRequiredCredentials = credentials;
+                    authRequired = true;
+                    Log("Silent credential renewal unavailable; interactive authentication required.");
+                    return false;
+                }
+
+                authRequired = false;
+                Log("Silent credential renewal unavailable; trying the current local credentials.");
+                return true;
+            case CredentialRenewalStatus.AuthenticationRequired:
+                _authenticationRequiredCredentials = credentials;
+                authRequired = true;
+                Log("Sony authorization was rejected; interactive authentication required.");
+                return false;
+            case CredentialRenewalStatus.TransientFailure:
+                authRequired = false;
+                Log("Sony credential renewal is temporarily unavailable; retrying without requiring sign-in.");
+                return !authenticatedHandshakeRejected;
+            default:
+                authRequired = false;
+                Log("Sony credential renewal failed; retrying without requiring sign-in.");
+                return !authenticatedHandshakeRejected;
         }
     }
 
@@ -122,7 +216,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Log($"Engine worker stopped unexpectedly: {ex.Message}");
+            Log($"Engine worker stopped unexpectedly: {DescribeFailure(ex)}");
         }
         finally
         {
@@ -135,7 +229,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         int backoffSec = 5;
 
         // Sticky across retry attempts once a handshake proves auth is required;
-        // cleared only by a successful authenticated handshake.
+        // cleared by replacement credentials or a successful authenticated handshake.
         bool authRequired = false;
 
         while (!_cts.Token.IsCancellationRequested)
@@ -176,52 +270,193 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
 
             try
             {
-                Log($"Connecting gRPC channel to {host}:{port}...");
-                client = _clientFactory(host, port, _credentials);
-                client.LogAction = Log;
+                var credentials = CurrentCredentials;
+                var refreshedForHandshake = false;
+                CredentialRenewalStatus? preflightRenewalStatus = null;
+                var suppressKeepaliveRenewal = false;
+                var readyToConnect = true;
 
-                try
+                if (_authenticationRequiredCredentials != null
+                    && !ReferenceEquals(credentials, _authenticationRequiredCredentials))
                 {
-                    await client.InitializeSessionAsync(connectionCts.Token);
+                    _authenticationRequiredCredentials = null;
                     authRequired = false;
                 }
-                catch (RpcException ex) when (ex.StatusCode == StatusCode.InvalidArgument)
-                {
-                    if (_credentials.IsValid)
-                    {
-                        authRequired = true;
-                        Log($"Authentication required: {ex.Message}");
-                    }
+                if (!ReferenceEquals(credentials, _refreshSuppressedCredentials))
+                    _refreshSuppressedCredentials = null;
+                if (!ReferenceEquals(credentials, _proactiveRenewalSuppressedCredentials))
+                    _proactiveRenewalSuppressedCredentials = null;
 
-                    throw;
+                if (ReferenceEquals(credentials, _authenticationRequiredCredentials))
+                {
+                    authRequired = true;
+                    readyToConnect = false;
+                }
+                else if (_credentialLifecycle != null
+                    && IsNearingExpiry(credentials)
+                    && !ReferenceEquals(credentials, _proactiveRenewalSuppressedCredentials))
+                {
+                    Log("Local credentials nearing expiry; refreshing before authenticated connect.");
+                    var renewal = await _credentialLifecycle.RefreshAsync(credentials, connectionCts.Token);
+                    preflightRenewalStatus = renewal.Status;
+                    readyToConnect = TryUseRenewalResult(
+                        renewal,
+                        ref credentials,
+                        ref authRequired,
+                        authenticatedHandshakeRejected: false);
+                    refreshedForHandshake = renewal.Status == CredentialRenewalStatus.Succeeded
+                        && !_credentialLifecycle.IsLocalKeyRefreshPending(credentials);
+                    suppressKeepaliveRenewal = renewal.Status != CredentialRenewalStatus.Succeeded;
                 }
 
-                Log("Full security handshake completed (ConfirmSignin + ConfirmKeys).");
+                var initialized = false;
+                while (readyToConnect && !initialized)
+                {
+                    if (_credentialLifecycle?.CurrentCredentials is { } latestCredentials
+                        && !ReferenceEquals(credentials, latestCredentials))
+                    {
+                        credentials = latestCredentials;
+                        _authenticationRequiredCredentials = null;
+                        authRequired = false;
+                        if (!ReferenceEquals(credentials, _refreshSuppressedCredentials))
+                            _refreshSuppressedCredentials = null;
+                        if (!ReferenceEquals(credentials, _proactiveRenewalSuppressedCredentials))
+                            _proactiveRenewalSuppressedCredentials = null;
+                        refreshedForHandshake = !_credentialLifecycle.IsLocalKeyRefreshPending(credentials);
+                    }
 
-                ActivateConnection(connectionGeneration, deviceName);
+                    Log($"Connecting gRPC channel to {host}:{port}...");
+                    client = _clientFactory(host, port, credentials);
+                    client.LogAction = Log;
 
-                var notifyTask = NotifyLoopAsync(client, connectionGeneration, connectionCts.Token);
-                connectionTasks.Add(notifyTask);
-                Log("Live notify stream started.");
+                    try
+                    {
+                        await client.InitializeSessionAsync(connectionCts.Token);
+                        authRequired = false;
+                        if (ReferenceEquals(credentials, _refreshSuppressedCredentials))
+                            _refreshSuppressedCredentials = null;
+                        initialized = true;
+                    }
+                    catch (RpcException ex) when (ex.StatusCode == StatusCode.InvalidArgument)
+                    {
+                        if (!credentials.IsValid)
+                        {
+                            Log("Authenticated handshake failed: StatusCode=InvalidArgument, Classification=request_failure (credentials incomplete).");
+                            throw;
+                        }
 
-                var initialSnapshotTask = InitialSnapshotAsync(
-                    client,
-                    deviceName,
-                    connectionGeneration,
-                    connectionFailure,
-                    connectionCts.Token);
-                connectionTasks.Add(initialSnapshotTask);
+                        Log("Authenticated handshake rejected with InvalidArgument.");
+                        if (_credentialLifecycle == null)
+                        {
+                            _authenticationRequiredCredentials = credentials;
+                            authRequired = true;
+                            Log("Silent credential renewal unavailable; interactive authentication required.");
+                            break;
+                        }
 
-                backoffSec = 5; // Reset backoff on successful connect
+                        if (refreshedForHandshake)
+                        {
+                            _refreshSuppressedCredentials = credentials;
+                            authRequired = false;
+                            Log("Authenticated handshake rejected renewed credentials; Classification=request_failure. Further refresh is suppressed for this credential snapshot.");
+                            break;
+                        }
 
-                // Start command drain loop and keepalive loop
-                var cmdDrainTask = CommandDrainLoopAsync(client, connectionGeneration, connectionCts.Token);
-                connectionTasks.Add(cmdDrainTask);
+                        if (ReferenceEquals(credentials, _refreshSuppressedCredentials))
+                        {
+                            authRequired = false;
+                            Log("Authenticated handshake still rejects the current renewed credentials; Classification=request_failure. Retrying without another refresh.");
+                            break;
+                        }
 
-                var keepAliveTask = KeepAlivePollLoopAsync(client, deviceName, connectionGeneration, connectionCts.Token);
-                connectionTasks.Add(keepAliveTask);
+                        if (preflightRenewalStatus is { } preflightStatus)
+                        {
+                            if (preflightStatus == CredentialRenewalStatus.Unavailable)
+                            {
+                                _authenticationRequiredCredentials = credentials;
+                                authRequired = true;
+                                Log("Authenticated handshake rejected and silent renewal is unavailable; interactive authentication required.");
+                            }
+                            else
+                            {
+                                authRequired = false;
+                                Log("Authenticated handshake rejected after a failed preflight renewal; retrying later without requiring sign-in.");
+                            }
+                            break;
+                        }
 
-                await Task.WhenAny(notifyTask, cmdDrainTask, keepAliveTask, connectionFailure.Task);
+                        Log("Authenticated handshake rejected; attempting one credential refresh.");
+                        var renewal = await _credentialLifecycle.RefreshAsync(credentials, connectionCts.Token);
+                        if (!TryUseRenewalResult(
+                                renewal,
+                                ref credentials,
+                                ref authRequired,
+                                authenticatedHandshakeRejected: true))
+                            break;
+
+                        refreshedForHandshake = renewal.Status == CredentialRenewalStatus.Succeeded
+                            && !_credentialLifecycle.IsLocalKeyRefreshPending(credentials);
+                        try
+                        {
+                            client.Dispose();
+                        }
+                        catch (Exception disposeError)
+                        {
+                            Log($"Rejected client dispose warning: {DescribeFailure(disposeError)}");
+                        }
+                        client = null;
+                    }
+                    catch (RpcException ex)
+                    {
+                        var classification = ex.StatusCode switch
+                        {
+                            StatusCode.Unavailable => "network_failure",
+                            StatusCode.NotFound or StatusCode.OutOfRange => "request_failure",
+                            _ => "unknown"
+                        };
+                        Log($"Authenticated handshake failed: StatusCode={ex.StatusCode}, Classification={classification}.");
+                        throw;
+                    }
+                }
+
+                if (initialized && client != null)
+                {
+                    Log("Full security handshake completed (ConfirmSignin + ConfirmKeys).");
+
+                    ActivateConnection(connectionGeneration, deviceName);
+
+                    var notifyTask = NotifyLoopAsync(client, connectionGeneration, connectionCts.Token);
+                    connectionTasks.Add(notifyTask);
+                    Log("Live notify stream started.");
+
+                    var initialSnapshotTask = InitialSnapshotAsync(
+                        client,
+                        deviceName,
+                        connectionGeneration,
+                        connectionFailure,
+                        connectionCts.Token);
+                    connectionTasks.Add(initialSnapshotTask);
+
+                    // Start command drain loop and keepalive loop
+                    var cmdDrainTask = CommandDrainLoopAsync(client, connectionGeneration, connectionCts.Token);
+                    connectionTasks.Add(cmdDrainTask);
+
+                    var keepAliveTask = KeepAlivePollLoopAsync(
+                        client,
+                        deviceName,
+                        connectionGeneration,
+                        suppressKeepaliveRenewal,
+                        connectionCts.Token);
+                    connectionTasks.Add(keepAliveTask);
+
+                    var connectionEnded = Task.WhenAny(notifyTask, cmdDrainTask, keepAliveTask, connectionFailure.Task);
+                    if (await Task.WhenAny(initialSnapshotTask, connectionEnded) == initialSnapshotTask
+                        && await initialSnapshotTask)
+                    {
+                        backoffSec = 5;
+                        await connectionEnded;
+                    }
+                }
             }
             catch (OperationCanceledException) when (_cts.Token.IsCancellationRequested)
             {
@@ -229,7 +464,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Log($"Connection/Stream error: {ex.Message}");
+                Log($"Connection/Stream error: {DescribeFailure(ex)}");
             }
             finally
             {
@@ -239,7 +474,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 }
                 catch (Exception ex)
                 {
-                    Log($"Connection cancellation warning: {ex.Message}");
+                    Log($"Connection cancellation warning: {DescribeFailure(ex)}");
                 }
 
                 SetDisconnectedState(connectionGeneration, authRequired);
@@ -256,7 +491,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     }
                     catch (Exception ex)
                     {
-                        Log($"Client dispose warning: {ex.Message}");
+                        Log($"Client dispose warning: {DescribeFailure(ex)}");
                     }
                 }
             }
@@ -307,11 +542,11 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Log($"Notify stream ended: {ex.Message}");
+            Log($"Notify stream ended: {DescribeFailure(ex)}");
         }
     }
 
-    private async Task InitialSnapshotAsync(
+    private async Task<bool> InitialSnapshotAsync(
         IBraviaClient client,
         string deviceName,
         long connectionGeneration,
@@ -321,7 +556,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         try
         {
             var baselineRevision = CaptureSnapshotRevision(connectionGeneration);
-            if (baselineRevision == null) return;
+            if (baselineRevision == null) return false;
 
             var initialStates = await client.GetInitialStatesAsync(MonitoredPaths, ct);
             ct.ThrowIfCancellationRequested();
@@ -330,19 +565,22 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             {
                 Log("Initial snapshot returned no monitored state.");
                 connectionFailure.TrySetResult(true);
-                return;
+                return false;
             }
 
             Log($"Snapshot received ({initialStates.Count} paths). Applying state...");
             ApplySnapshotForConnection(initialStates, deviceName, connectionGeneration, baselineRevision.Value);
+            return true;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            return false;
         }
         catch (Exception ex)
         {
-            Log($"Initial snapshot warning: {ex.Message}");
+            Log($"Initial snapshot warning: {DescribeFailure(ex)}");
             connectionFailure.TrySetResult(true);
+            return false;
         }
     }
 
@@ -359,7 +597,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Log($"Connection worker cleanup warning: {ex.Message}");
+            Log($"Connection worker cleanup warning: {DescribeFailure(ex)}");
         }
     }
 
@@ -448,7 +686,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Log($"StateChanged subscriber warning: {ex.Message}");
+                Log($"StateChanged subscriber warning: {DescribeFailure(ex)}");
             }
         }
     }
@@ -533,7 +771,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     }
                     catch (Exception ex)
                     {
-                        Log($"Command '{path}' exec error: {ex.Message}");
+                        Log($"Command '{path}' exec error: {DescribeFailure(ex)}");
                         return;
                     }
                 }
@@ -544,7 +782,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Log($"Command drain error: {ex.Message}");
+                Log($"Command drain error: {DescribeFailure(ex)}");
                 return;
             }
         }
@@ -562,6 +800,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         IBraviaClient client,
         string deviceName,
         long connectionGeneration,
+        bool suppressCredentialRenewal,
         CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -570,6 +809,16 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             {
                 await _delayAsync(TimeSpan.FromSeconds(25), ct);
                 ct.ThrowIfCancellationRequested();
+
+                var credentials = CurrentCredentials;
+                if (!suppressCredentialRenewal
+                    && _credentialLifecycle != null
+                    && IsNearingExpiry(credentials)
+                    && !ReferenceEquals(credentials, _proactiveRenewalSuppressedCredentials))
+                {
+                    Log("Local credentials nearing expiry; reconnecting for renewal.");
+                    return;
+                }
 
                 var baselineRevision = CaptureSnapshotRevision(connectionGeneration);
                 if (baselineRevision == null) return;
@@ -588,7 +837,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Log($"Keepalive poll failed: {ex.Message}");
+                Log($"Keepalive poll failed: {DescribeFailure(ex)}");
                 throw;
             }
         }
@@ -1086,7 +1335,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Log($"Engine cancellation warning: {ex.Message}");
+            Log($"Engine cancellation warning: {DescribeFailure(ex)}");
         }
     }
 

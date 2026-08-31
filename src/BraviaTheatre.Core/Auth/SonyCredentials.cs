@@ -2,51 +2,53 @@ using System.Text.Json.Serialization;
 
 namespace BraviaTheatre.Core.Auth;
 
-public sealed class SonyCredentials
+/// <summary>Immutable Sony cloud and local-control credential snapshot.</summary>
+public sealed record SonyCredentials
 {
     [JsonPropertyName("client_id")]
-    public string ClientId { get; set; } = "4f97b8e2-0bb3-45ef-be91-b68e85ca7ee1";
+    public string ClientId { get; init; } = SonyOAuth.ClientId;
 
+    /// <summary>Legacy local session identifier retained for existing credential files.</summary>
     [JsonPropertyName("session_id")]
-    public string? SessionIdRaw { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacySessionId { get; init; }
 
     [JsonPropertyName("key_id")]
-    public string? KeyIdRaw { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? KeyId { get; init; }
 
+    /// <summary>The Sony key id, falling back to the legacy session_id field.</summary>
     [JsonIgnore]
     public string SessionId
     {
-        get => !string.IsNullOrEmpty(SessionIdRaw) ? SessionIdRaw : (KeyIdRaw ?? string.Empty);
-        set => SessionIdRaw = value;
+        get => !string.IsNullOrWhiteSpace(KeyId) ? KeyId : LegacySessionId ?? string.Empty;
+        init => LegacySessionId = value;
     }
-
-    [JsonPropertyName("hmac_key")]
-    public string? HmacKeyRaw { get; set; }
 
     [JsonPropertyName("session_key")]
-    public string? SessionKeyRaw { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionKey { get; init; }
 
-    [JsonIgnore]
-    public string HmacKey
-    {
-        get => !string.IsNullOrEmpty(HmacKeyRaw) ? HmacKeyRaw : (SessionKeyRaw ?? string.Empty);
-        set => HmacKeyRaw = value;
-    }
-
-    [JsonPropertyName("access_token")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.Always)]
-    public string? AccessToken { get; set; }
+    [JsonPropertyName("hmac_key")]
+    public string HmacKey { get; init; } = string.Empty;
 
     [JsonPropertyName("refresh_token")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.Always)]
-    public string? RefreshToken { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RefreshToken { get; init; }
 
     [JsonPropertyName("device_id")]
-    public string? DeviceId { get; set; }
+    public string? DeviceId { get; init; }
+
+    [JsonPropertyName("session_keys_expires_at_utc")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? SessionKeysExpiresAtUtc { get; init; }
 
     [JsonIgnore]
     public bool IsValid =>
         !string.IsNullOrWhiteSpace(ClientId) &&
+        !string.IsNullOrWhiteSpace(DeviceId) &&
         !string.IsNullOrWhiteSpace(SessionId) &&
         !string.IsNullOrWhiteSpace(HmacKey);
+
+    public override string ToString() => nameof(SonyCredentials);
 }

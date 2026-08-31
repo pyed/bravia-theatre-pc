@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using BraviaTheatre.Core.Auth;
 using BraviaTheatre.Core.Engine;
@@ -24,8 +25,7 @@ public partial class App : Application
     private TrayMenuWindow? _trayMenu;
     private NativeTrayIcon? _trayIcon;
     private GlobalHotkeyService? _hotkeyService;
-    private SonyCredentialStore? _credentialStore;
-    private SonyCredentials? _credentials;
+    private SonyCredentialLifecycle? _credentialLifecycle;
     private AppSettings _settings = new();
     private SettingsWindow? _settingsWindow;
     private AuthDialog? _authDialog;
@@ -190,13 +190,27 @@ public partial class App : Application
         if (!string.IsNullOrWhiteSpace(settingsWarning))
             MessageBox.Show(settingsWarning, "Settings Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
 
-        _credentialStore = new SonyCredentialStore(Path.Combine(GetAppDataDir(), "credentials.dat"));
-        var credentialResult = _credentialStore.Load();
+        var credentialStore = new SonyCredentialStore(Path.Combine(GetAppDataDir(), "credentials.dat"));
+        var credentialResult = credentialStore.Load();
         if (!string.IsNullOrWhiteSpace(credentialResult.Message))
             MessageBox.Show(credentialResult.Message, "Credential Storage", MessageBoxButton.OK, MessageBoxImage.Warning);
 
-        _credentials = credentialResult.Credentials;
-        if (_credentials?.IsValid != true)
+        _credentialLifecycle = new SonyCredentialLifecycle(
+            credentialResult.Credentials,
+            static (credentials, checkpointRotatedRefreshTokenAsync, cancellationToken) =>
+                SonyOAuth.RefreshSessionKeysAsync(
+                    credentials,
+                    cancellationToken,
+                    checkpointRotatedRefreshTokenAsync: checkpointRotatedRefreshTokenAsync),
+            (credentials, cancellationToken) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!credentialStore.TrySave(credentials, out var error))
+                    throw new InvalidOperationException(error ?? "Could not save protected Sony credentials.");
+                return Task.CompletedTask;
+            });
+
+        if (_credentialLifecycle.CurrentCredentials?.IsValid != true)
         {
             Log("Valid protected credentials were not found. Opening AuthDialog...");
             if (!ShowAuthDialog(restartEngine: false))
@@ -207,7 +221,7 @@ public partial class App : Application
             }
         }
 
-        if (_credentials?.IsValid != true)
+        if (_credentialLifecycle.CurrentCredentials?.IsValid != true)
         {
             Log("No valid credentials after AuthDialog. Shutting down.");
             MessageBox.Show("Valid Sony credentials are required to run.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -219,7 +233,7 @@ public partial class App : Application
 
         // Initialize System Tray
         var trayIconShown = InitializeTray();
-        ReplaceEngine(_credentials);
+        ReplaceEngine();
         _startupCompleted = true;
         if (trayIconShown)
             Dispatcher.BeginInvoke(new Action(ShowTrayIconGuidanceOnce));
@@ -310,9 +324,9 @@ public partial class App : Application
                 !string.Equals(previousSettings.StaticHost?.Trim(), updated.StaticHost?.Trim(), StringComparison.OrdinalIgnoreCase) ||
                 previousSettings.StaticPort != updated.StaticPort;
 
-            if (connectionChanged && _credentials?.IsValid == true)
+            if (connectionChanged && _credentialLifecycle?.CurrentCredentials?.IsValid == true)
             {
-                ReplaceEngine(_credentials);
+                ReplaceEngine();
             }
             else
             {
@@ -326,22 +340,21 @@ public partial class App : Application
 
     private bool ShowAuthDialog(bool restartEngine)
     {
-        if (_credentialStore == null) return false;
+        if (_credentialLifecycle == null) return false;
         if (_authDialog != null)
         {
             _authDialog.Activate();
             return false;
         }
 
-        var dialog = new AuthDialog(_credentialStore);
+        var dialog = new AuthDialog(_credentialLifecycle);
         _authDialog = dialog;
         try
         {
-            if (dialog.ShowDialog() != true || dialog.AuthenticatedCredentials?.IsValid != true)
+            if (dialog.ShowDialog() != true || _credentialLifecycle.CurrentCredentials?.IsValid != true)
                 return false;
 
-            _credentials = dialog.AuthenticatedCredentials;
-            if (restartEngine) ReplaceEngine(_credentials);
+            if (restartEngine) ReplaceEngine();
             return true;
         }
         finally
@@ -350,8 +363,13 @@ public partial class App : Application
         }
     }
 
-    private void ReplaceEngine(SonyCredentials credentials)
+    private void ReplaceEngine()
     {
+        var credentialLifecycle = _credentialLifecycle
+            ?? throw new InvalidOperationException("Sony credential lifecycle is not initialized.");
+        if (credentialLifecycle.CurrentCredentials?.IsValid != true)
+            throw new InvalidOperationException("Valid Sony credentials are required to start the engine.");
+
         var oldEngine = _engine;
         var generation = InvalidateEngineState(oldEngine);
         ApplyStateToUi(SoundbarState.Disconnected);
@@ -369,7 +387,7 @@ public partial class App : Application
 
         var host = string.IsNullOrWhiteSpace(_settings.StaticHost) ? null : _settings.StaticHost.Trim();
         var port = _settings.StaticPort is >= 1 and <= 65535 ? _settings.StaticPort : 55051;
-        var newEngine = new BraviaEngine(credentials, host, port) { LogAction = Log };
+        var newEngine = new BraviaEngine(credentialLifecycle, host, port) { LogAction = Log };
         _engine = newEngine;
         _hotkeyService = new GlobalHotkeyService(newEngine);
         ApplyHotkeySettings(showUserError: false);

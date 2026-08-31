@@ -21,8 +21,8 @@ public sealed record CredentialLoadResult(
     string? Message = null);
 
 /// <summary>
-/// Stores the local-control credentials encrypted for the current Windows user.
-/// Cloud bearer/refresh tokens are intentionally excluded by SonyCredentials JSON metadata.
+/// Stores local-control credentials, optional Sony renewal material, and expiry metadata
+/// encrypted for the current Windows user. Short-lived access tokens are not persisted.
 /// </summary>
 public sealed class SonyCredentialStore
 {
