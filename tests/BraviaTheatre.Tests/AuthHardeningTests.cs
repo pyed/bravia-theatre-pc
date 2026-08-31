@@ -494,7 +494,7 @@ public sealed class AuthHardeningTests
         var credentialPath = Path.Combine(tempDir, "credentials.dat");
         var store = new SonyCredentialStore(credentialPath);
         var initial = ValidCredentials("initial-refresh");
-        var replacement = ValidCredentials("replacement-refresh") with { KeyId = "replacement-key" };
+        var replacement = ValidCredentials("replacement-refresh") with { KeyId = "key2" };
 
         try
         {
