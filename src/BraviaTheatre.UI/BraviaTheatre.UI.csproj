@@ -8,7 +8,6 @@
     <AssemblyName>BraviaTheatrePC</AssemblyName>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
     <Description>Native Windows 11 Fluent audio controller for Sony BRAVIA Theatre systems</Description>
   </PropertyGroup>
 
