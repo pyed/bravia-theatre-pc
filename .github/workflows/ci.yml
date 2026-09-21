@@ -71,7 +71,7 @@ jobs:
         run: dotnet package list --project BraviaTheatrePC.sln --vulnerable --include-transitive
 
       - name: Smoke-test standalone publish
-        run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o artifacts/standalone
+        run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:DebugType=none -o artifacts/standalone
 
       - name: Smoke-test framework-dependent publish
         run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --no-self-contained -p:PublishSingleFile=true -p:DebugType=none -o artifacts/framework-dependent

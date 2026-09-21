@@ -8,6 +8,13 @@
     <AssemblyName>BraviaTheatrePC</AssemblyName>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Compressing the bundle forces every managed assembly to be decompressed into
+         private memory on load. Left uncompressed they are mapped straight from the
+         file, so the pages stay shared, file-backed, and reclaimable: measured 89 MB
+         to 23 MB private working set. The release ships the executable in a zip, so
+         the download stays the same size. -->
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+    <PublishReadyToRun>true</PublishReadyToRun>
     <Description>Native Windows 11 Fluent audio controller for Sony BRAVIA Theatre systems</Description>
   </PropertyGroup>
 
