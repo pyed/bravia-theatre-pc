@@ -27,6 +27,7 @@ public partial class FlyoutWindow : Window
 
     private readonly BraviaEngine _engine;
     private readonly Action _onAuthenticate;
+    private readonly Action _onChooseSoundbar;
     private readonly FlyoutTransitionController _presentation = new();
     private AppSettings _settings;
     private DispatcherTimer? _animationTimer;
@@ -36,7 +37,7 @@ public partial class FlyoutWindow : Window
     private uint _lastDeactivationMessageTime;
     private bool _inputMenuOpen;
     private bool _deactivatedWhileInputMenuOpen;
-    private bool _authenticateAfterClose;
+    private Action? _afterCloseAction;
     private bool _isUpdatingUi;
     private bool _isDraggingSlider;
     private bool _allowClose;
@@ -101,7 +102,7 @@ public partial class FlyoutWindow : Window
         public uint Flags;
     }
 
-    public FlyoutWindow(BraviaEngine engine, AppSettings settings, Action onAuthenticate)
+    public FlyoutWindow(BraviaEngine engine, AppSettings settings, Action onAuthenticate, Action onChooseSoundbar)
     {
         InitializeComponent();
         // Assign the shared device limits in code. Referencing const fields through
@@ -113,6 +114,7 @@ public partial class FlyoutWindow : Window
         _engine = engine;
         _settings = settings;
         _onAuthenticate = onAuthenticate;
+        _onChooseSoundbar = onChooseSoundbar;
 
         WindowBackdropService.Attach(this, WindowBackdropKind.TransientWindow);
         Deactivated += OnDeactivated;
@@ -197,7 +199,7 @@ public partial class FlyoutWindow : Window
     public void CloseForShutdown()
     {
         _allowClose = true;
-        _authenticateAfterClose = false;
+        _afterCloseAction = null;
         StopAnimation();
         Close();
     }
@@ -276,7 +278,10 @@ public partial class FlyoutWindow : Window
             AuthRequiredCard.Visibility = presentation.ShowAuthenticationPrompt
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            CodecCard.Visibility = presentation.ShowAuthenticationPrompt
+            DeviceAssociationCard.Visibility = presentation.ShowDeviceAssociationPrompt
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            CodecCard.Visibility = presentation.ShowAuthenticationPrompt || presentation.ShowDeviceAssociationPrompt
                 ? Visibility.Collapsed
                 : Visibility.Visible;
 
@@ -284,6 +289,11 @@ public partial class FlyoutWindow : Window
             {
                 SetBrushResource(IconPower, Shape.FillProperty, "SystemFillColorCautionBrush");
                 BtnHeaderPower.ToolTip = "Sony account sign-in required";
+            }
+            else if (state.DeviceAssociationRequired)
+            {
+                SetBrushResource(IconPower, Shape.FillProperty, "SystemFillColorCautionBrush");
+                BtnHeaderPower.ToolTip = "Choose your soundbar to reconnect";
             }
             else if (!state.Connected)
             {
@@ -347,6 +357,8 @@ public partial class FlyoutWindow : Window
                 BtnHeaderPower,
                 state.AuthRequired
                     ? "Soundbar power unavailable: Sony account sign-in required"
+                    : state.DeviceAssociationRequired
+                    ? "Soundbar power unavailable: choose your soundbar to reconnect"
                     : !state.Connected
                     ? "Soundbar power: offline"
                     : state.Power ? "Soundbar power: on" : "Soundbar power: standby");
@@ -406,7 +418,7 @@ public partial class FlyoutWindow : Window
     private void BeginOpen(FlyoutTransition transition, PixelRect? trayAnchor)
     {
         StopAnimation();
-        _authenticateAfterClose = false;
+        _afterCloseAction = null;
         _trayAnchor = trayAnchor ?? _trayAnchor;
         var wasVisible = IsVisible;
 
@@ -511,11 +523,11 @@ public partial class FlyoutWindow : Window
             RootBorder.Opacity = 0;
             Hide();
             RootBorder.Opacity = 1;
-            if (_authenticateAfterClose && !_allowClose &&
+            if (_afterCloseAction is { } action && !_allowClose &&
                 !Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
             {
-                _authenticateAfterClose = false;
-                Dispatcher.BeginInvoke(_onAuthenticate, DispatcherPriority.Background);
+                _afterCloseAction = null;
+                Dispatcher.BeginInvoke(action, DispatcherPriority.Background);
             }
         }
     }
@@ -784,7 +796,13 @@ public partial class FlyoutWindow : Window
 
     private void BtnAuthenticate_Click(object sender, RoutedEventArgs e)
     {
-        _authenticateAfterClose = true;
+        _afterCloseAction = _onAuthenticate;
+        RequestClose(causedByDeactivation: false);
+    }
+
+    private void BtnChooseSoundbar_Click(object sender, RoutedEventArgs e)
+    {
+        _afterCloseAction = _onChooseSoundbar;
         RequestClose(causedByDeactivation: false);
     }
 }

@@ -29,6 +29,9 @@ public partial class App : Application
     private AppSettings _settings = new();
     private SettingsWindow? _settingsWindow;
     private AuthDialog? _authDialog;
+    private DeviceSelectionDialog? _deviceSelectionDialog;
+    private CancellationTokenSource? _deviceRecoveryCts;
+    private bool _soundbarPickerDismissed;
     private bool _isShuttingDown;
     private bool _startupCompleted;
 
@@ -100,7 +103,8 @@ public partial class App : Application
 
     public static void Log(string message)
     {
-        bool isCritical = message.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+        bool isCritical = message.Contains("[Credential renewal]", StringComparison.Ordinal) ||
+                          message.Contains("error", StringComparison.OrdinalIgnoreCase) ||
                           message.Contains("exception", StringComparison.OrdinalIgnoreCase) ||
                           message.Contains("fatal", StringComparison.OrdinalIgnoreCase) ||
                           message.Contains("failed", StringComparison.OrdinalIgnoreCase);
@@ -197,18 +201,21 @@ public partial class App : Application
 
         _credentialLifecycle = new SonyCredentialLifecycle(
             credentialResult.Credentials,
-            static (credentials, checkpointRotatedRefreshTokenAsync, cancellationToken) =>
+            static (credentials, checkpointRotatedRefreshTokenAsync, cancellationToken, reassociationSelector) =>
                 SonyOAuth.RefreshSessionKeysAsync(
                     credentials,
                     cancellationToken,
-                    checkpointRotatedRefreshTokenAsync: checkpointRotatedRefreshTokenAsync),
+                    checkpointRotatedRefreshTokenAsync: checkpointRotatedRefreshTokenAsync,
+                    diagnosticLog: Log,
+                    reassociationSelector: reassociationSelector),
             (credentials, cancellationToken) =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!credentialStore.TrySave(credentials, out var error))
                     throw new InvalidOperationException(error ?? "Could not save protected Sony credentials.");
                 return Task.CompletedTask;
-            });
+            })
+        { DiagnosticLog = Log };
 
         if (_credentialLifecycle.CurrentCredentials?.IsValid != true)
         {
@@ -341,6 +348,7 @@ public partial class App : Application
     private bool ShowAuthDialog(bool restartEngine)
     {
         if (_credentialLifecycle == null) return false;
+        CancelDeviceRecovery();
         if (_authDialog != null)
         {
             _authDialog.Activate();
@@ -363,8 +371,91 @@ public partial class App : Application
         }
     }
 
+    private async Task ChooseSoundbarAsync()
+    {
+        if (_isShuttingDown || _credentialLifecycle?.CurrentCredentials is not { IsValid: true } credentials)
+            return;
+        if (_deviceRecoveryCts != null)
+        {
+            _deviceSelectionDialog?.Activate();
+            return;
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        _deviceRecoveryCts = cancellation;
+        _soundbarPickerDismissed = false;
+        try
+        {
+            var result = await _credentialLifecycle.RefreshAsync(credentials, cancellation.Token, SelectReassociatedDeviceAsync);
+            if (cancellation.IsCancellationRequested || _isShuttingDown) return;
+            if (result.Status == CredentialRenewalStatus.Succeeded)
+            {
+                ReplaceEngine();
+            }
+            else if (!_soundbarPickerDismissed)
+            {
+                MessageBox.Show(
+                    result.Status == CredentialRenewalStatus.DeviceAssociationRequired
+                        ? "No soundbar could be selected. Check that your soundbar is linked in BRAVIA Connect, then choose it again."
+                        : "The soundbar could not be reconnected. Please try again.",
+                    "Reconnect soundbar", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Closing the picker, replacing the engine, and shutdown cancel selection.
+        }
+        catch (Exception error)
+        {
+            Log($"[Credential renewal] Device selection failed; ExceptionType={error.GetType().Name}.");
+            if (!_isShuttingDown && !cancellation.IsCancellationRequested)
+                MessageBox.Show("The soundbar could not be reconnected. Please try again.",
+                    "Reconnect soundbar", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            if (ReferenceEquals(_deviceRecoveryCts, cancellation)) _deviceRecoveryCts = null;
+        }
+    }
+
+    private async Task<string?> SelectReassociatedDeviceAsync(
+        System.Collections.Generic.IReadOnlyList<SonyDeviceInfo> devices,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var selection = Dispatcher.InvokeAsync(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var dialog = new DeviceSelectionDialog(devices);
+            _deviceSelectionDialog = dialog;
+            try
+            {
+                if (dialog.ShowDialog() == true) return dialog.SelectedDeviceId;
+
+                // Dismissing the picker is a deliberate answer, not a failure to report back.
+                _soundbarPickerDismissed = true;
+                return null;
+            }
+            finally
+            {
+                _deviceSelectionDialog = null;
+            }
+        }, System.Windows.Threading.DispatcherPriority.Normal, cancellationToken);
+
+        // A cancelled engine/shutdown must release the lifecycle gate even if the
+        // UI thread is currently waiting for that engine to finish stopping.
+        return await selection.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private void CancelDeviceRecovery()
+    {
+        _deviceRecoveryCts?.Cancel();
+        _deviceSelectionDialog?.Close();
+    }
+
     private void ReplaceEngine()
     {
+        CancelDeviceRecovery();
         var credentialLifecycle = _credentialLifecycle
             ?? throw new InvalidOperationException("Sony credential lifecycle is not initialized.");
         if (credentialLifecycle.CurrentCredentials?.IsValid != true)
@@ -431,6 +522,7 @@ public partial class App : Application
 
     private void ShowPrimarySurface()
     {
+        if (_deviceSelectionDialog != null) { _deviceSelectionDialog.Activate(); return; }
         if (_authDialog != null) { _authDialog.Activate(); return; }
         if (_settingsWindow != null) { _settingsWindow.Activate(); return; }
         EnsureFlyout()?.ShowFlyout(TryGetTrayAnchor());
@@ -444,6 +536,7 @@ public partial class App : Application
             return;
         }
 
+        if (_deviceSelectionDialog != null) { _deviceSelectionDialog.Activate(); return; }
         if (_authDialog != null) { _authDialog.Activate(); return; }
         if (_settingsWindow != null) { _settingsWindow.Activate(); return; }
         EnsureFlyout()?.ToggleFromTray(activation, TryGetTrayAnchor());
@@ -457,7 +550,8 @@ public partial class App : Application
         var flyout = new FlyoutWindow(
             _engine,
             _settings,
-            () => ShowAuthDialog(restartEngine: true));
+            () => ShowAuthDialog(restartEngine: true),
+            () => _ = ChooseSoundbarAsync());
         flyout.UpdateState(_latestState);
         _flyout = flyout;
         return flyout;
@@ -610,6 +704,7 @@ public partial class App : Application
         if (_isShuttingDown) return;
         _isShuttingDown = true;
 
+        CancelDeviceRecovery();
         try { _authDialog?.Close(); } catch { }
         try { _settingsWindow?.Close(); } catch { }
         try { _trayMenu?.CloseForShutdown(); } catch { }

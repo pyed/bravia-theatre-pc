@@ -25,7 +25,7 @@
 
             <StackPanel Margin="0,0,0,14">
                 <TextBlock Text="Select a Sony device" FontSize="22" FontWeight="SemiBold"/>
-                <TextBlock Text="More than one compatible device is linked to this account."
+                <TextBlock Text="Choose the Sony soundbar you want to control."
                            Style="{StaticResource CaptionText}"
                            Margin="0,4,0,0"/>
             </StackPanel>

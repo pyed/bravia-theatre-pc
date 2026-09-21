@@ -299,7 +299,8 @@ internal readonly record struct SoundbarUiPresentation(
     bool ShowAuthenticationPrompt,
     bool ControlsEnabled,
     string TrayTooltip,
-    string TrayMenuHeader);
+    string TrayMenuHeader,
+    bool ShowDeviceAssociationPrompt = false);
 
 internal static class SoundbarUiPresentationFactory
 {
@@ -312,6 +313,16 @@ internal static class SoundbarUiPresentationFactory
                 ControlsEnabled: false,
                 TrayTooltip: "BRAVIA Theatre PC • Sony account sign-in required",
                 TrayMenuHeader: "BRAVIA Theatre | Sony account sign-in required");
+        }
+
+        if (state.DeviceAssociationRequired)
+        {
+            return new SoundbarUiPresentation(
+                ShowAuthenticationPrompt: false,
+                ControlsEnabled: false,
+                TrayTooltip: "BRAVIA Theatre PC • Choose your soundbar to reconnect",
+                TrayMenuHeader: "BRAVIA Theatre | Choose your soundbar to reconnect",
+                ShowDeviceAssociationPrompt: true);
         }
 
         if (!state.Connected)

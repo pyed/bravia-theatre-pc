@@ -23,7 +23,7 @@ public class ReleasePolishTests
                 var app = new BraviaTheatre.UI.App();
                 app.InitializeComponent();
                 using var engine = new BraviaEngine(new SonyCredentials(), "test-host");
-                var flyout = new FlyoutWindow(engine, new AppSettings(), static () => { });
+                var flyout = new FlyoutWindow(engine, new AppSettings(), static () => { }, static () => { });
                 var rearSlider = Assert.IsType<Slider>(flyout.FindName("SliderRear"));
                 var soundFieldWaves = Assert.IsType<System.Windows.Shapes.Path>(flyout.FindName("IconSoundFieldWaves"));
                 var soundFieldNote = Assert.IsType<System.Windows.Shapes.Path>(flyout.FindName("IconSoundFieldNote"));
@@ -67,6 +67,25 @@ public class ReleasePolishTests
                 Assert.Equal("min", FlyoutWindow.StepBassLevel("min", -1));
                 Assert.Equal("mid", FlyoutWindow.StepBassLevel("min", 1));
                 Assert.Equal("max", FlyoutWindow.StepBassLevel("mid", 1));
+
+                // The codec, sign-in, and soundbar-selection cards share one grid row,
+                // so exactly one of them may ever be visible.
+                var codecCard = Assert.IsType<Border>(flyout.FindName("CodecCard"));
+                var authCard = Assert.IsType<Border>(flyout.FindName("AuthRequiredCard"));
+                var associationCard = Assert.IsType<Border>(flyout.FindName("DeviceAssociationCard"));
+                var cards = new[] { codecCard, authCard, associationCard };
+
+                flyout.UpdateState(SoundbarState.Disconnected with { DeviceAssociationRequired = true });
+                Assert.Equal(System.Windows.Visibility.Visible, associationCard.Visibility);
+                Assert.Single(cards, card => card.Visibility == System.Windows.Visibility.Visible);
+
+                flyout.UpdateState(SoundbarState.Disconnected with { AuthRequired = true, DeviceAssociationRequired = true });
+                Assert.Equal(System.Windows.Visibility.Visible, authCard.Visibility);
+                Assert.Single(cards, card => card.Visibility == System.Windows.Visibility.Visible);
+
+                flyout.UpdateState(new SoundbarState { Connected = true, Power = true });
+                Assert.Equal(System.Windows.Visibility.Visible, codecCard.Visibility);
+                Assert.Single(cards, card => card.Visibility == System.Windows.Visibility.Visible);
 
                 flyout.CloseForShutdown();
                 app.Shutdown();

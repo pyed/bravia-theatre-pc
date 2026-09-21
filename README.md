@@ -18,7 +18,7 @@ Built with C# and .NET 10, the application communicates directly with the device
 - A Windows 11 Fluent quick-controls flyout with native desktop Acrylic, system light/dark and accent colors, high-contrast support, and controls for volume, mute, input, a compact bass stepper, optional rear-speaker level, sound field, night mode, voice mode, and power.
 - Configurable global shortcuts, registered atomically so a conflicting shortcut cannot leave a partial hotkey setup.
 - Embedded Sony OAuth sign-in with PKCE and callback-state verification, a manual browser fallback, explicit device selection when an account contains multiple compatible devices, and a temporary browser profile that is removed after sign-in closes.
-- Windows user-scoped credential protection using DPAPI, including silent renewal of expiring local credentials when Sony provides renewable authorization.
+- Windows user-scoped credential protection using DPAPI, including silent renewal of expiring local credentials when Sony provides renewable authorization, and recovery when Sony re-registers the soundbar under a new cloud association.
 - Automatic local discovery using mDNS first, followed by a bounded subnet probe that fingerprints candidates before connecting.
 - Connection-scoped workers, health polling, command coalescing, stale-command rejection, and clean reconnect/teardown behavior.
 - Native Win32 tray integration with Explorer restart recovery, a supported Taskbar Settings shortcut and one-time visibility guidance, taskbar-aware multi-monitor placement, reduced-motion-aware slide animations, click-to-toggle behavior, and show-only single-instance activation.
@@ -92,6 +92,8 @@ The application validates the OAuth state before exchanging the authorization co
 ```
 
 The file is encrypted for the current Windows user with DPAPI. The refresh token is retained only when needed to renew Sony/local-control authorization; it is never logged. Short-lived Sony access tokens are not retained. If protected credentials are not present, the application starts Sony account setup and creates them after successful sign-in. Do not copy credential files, callback URLs, browser network captures, or verbose logs into issues, tests, or commits.
+
+Reconfiguring the soundbar's network in BRAVIA Connect can leave it registered under a different cloud association, after which Sony stops issuing local credentials for the stored one. Sony account authorization is still valid in that case, so the application does not ask you to sign in again. When it can prove the replacement is the same physical soundbar, it reassociates silently. Otherwise the flyout offers **Choose soundbar**, which lists the compatible devices currently linked to the account so the selection stays explicit. Until a replacement is installed the application stays offline rather than guessing, and it will not switch devices while the stored association is still listed, when no compatible device is linked, or when more than one could plausibly match.
 
 Use **Sony Account Setup** from the tray menu or **Sign in again** in Settings to select another account/device or replace local credentials. The existing engine is stopped before the replacement connection starts. WebView2 stores cookies and cached resources only for the active sign-in session; its temporary profile is removed after the dialog closes and recreated if another sign-in is needed.
 

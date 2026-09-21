@@ -304,6 +304,31 @@
                     </Grid>
                 </Border>
 
+                <Border x:Name="DeviceAssociationCard"
+                        Grid.Row="1"
+                        Style="{StaticResource SettingsCard}"
+                        Padding="14"
+                        Margin="0,0,0,12"
+                        Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock Text="Choose your soundbar to reconnect"
+                                   FontSize="15"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap"/>
+                        <TextBlock Text="The saved soundbar association has changed. Check your soundbar in BRAVIA Connect, then choose it here."
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"
+                                   Margin="0,3,0,9"/>
+                        <Button Content="Choose soundbar"
+                                Style="{StaticResource AccentButton}"
+                                HorizontalAlignment="Left"
+                                Padding="14,5"
+                                Click="BtnChooseSoundbar_Click"
+                                AutomationProperties.Name="Choose soundbar to reconnect"/>
+                    </StackPanel>
+                </Border>
+
                 <Grid Grid.Row="2" Margin="0,0,0,12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>

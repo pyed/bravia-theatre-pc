@@ -260,6 +260,75 @@ public class AuthRequiredRegressionTests
     }
 
     [Fact]
+    public async Task StaleDeviceAssociation_OffersRecoveryWithoutAuthenticationPrompt()
+    {
+        var stale = Credentials("stale", DateTimeOffset.UtcNow.AddMinutes(1));
+        var associationRequired = NewSignal();
+        var lifecycle = Lifecycle(stale, (_, _) =>
+            throw new SonyOAuthException(SonyOAuthFailureKind.DeviceAssociationRequired, "association changed"));
+        var engine = CreateEngine(lifecycle, () =>
+            throw new Xunit.Sdk.XunitException("No local handshake should run while reassociation is required."));
+        engine.StateChanged += state =>
+        {
+            if (state.DeviceAssociationRequired) associationRequired.TrySetResult(true);
+        };
+
+        try
+        {
+            engine.Start();
+            await associationRequired.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+
+            Assert.True(engine.CurrentState.DeviceAssociationRequired);
+            Assert.False(engine.CurrentState.AuthRequired);
+        }
+        finally
+        {
+            await StopEngineAsync(engine);
+        }
+    }
+
+    [Fact]
+    public async Task StaleDeviceAssociation_StopsQueryingSonyOnEveryRetry()
+    {
+        var stale = Credentials("stale", DateTimeOffset.UtcNow.AddMinutes(1));
+        var refreshCount = 0;
+        var thirdBackoffReached = NewSignal();
+        var lifecycle = Lifecycle(stale, (_, _) =>
+        {
+            Interlocked.Increment(ref refreshCount);
+            throw new SonyOAuthException(SonyOAuthFailureKind.DeviceAssociationRequired, "association changed");
+        });
+        var engine = new BraviaEngine(
+            lifecycle,
+            "192.168.1.50",
+            4000,
+            (_, _, _) => throw new Xunit.Sdk.XunitException("No local handshake should run while reassociation is required."),
+            (delay, ct) =>
+            {
+                if (delay != TimeSpan.FromSeconds(20))
+                    return Task.CompletedTask;
+
+                thirdBackoffReached.TrySetResult(true);
+                return Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            });
+
+        try
+        {
+            engine.Start();
+            await thirdBackoffReached.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, Volatile.Read(ref refreshCount));
+            Assert.True(engine.CurrentState.DeviceAssociationRequired);
+            Assert.False(engine.CurrentState.AuthRequired);
+            Assert.Same(stale, lifecycle.CurrentCredentials);
+        }
+        finally
+        {
+            await StopEngineAsync(engine);
+        }
+    }
+
+    [Fact]
     public async Task InstalledReplacementClearsStickyAuthRequiredBeforeNetworkFailure()
     {
         var revoked = Credentials("revoked", DateTimeOffset.UtcNow.AddMinutes(1));

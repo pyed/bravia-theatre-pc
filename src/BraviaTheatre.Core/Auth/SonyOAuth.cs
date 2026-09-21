@@ -19,7 +19,12 @@ public sealed record SonyOAuthCallback(string Code, string State)
     public override string ToString() => nameof(SonyOAuthCallback);
 }
 
-public sealed record SonyDeviceInfo(string DeviceId, string DisplayName, string DeviceType);
+public sealed record SonyDeviceInfo(
+    string DeviceId, string DisplayName, string DeviceType,
+    string? DeviceUniqueId = null, string? ModelName = null)
+{
+    public override string ToString() => nameof(SonyDeviceInfo);
+}
 
 public delegate Task<string?> SonyDeviceSelector(
     IReadOnlyList<SonyDeviceInfo> devices,
@@ -194,7 +199,7 @@ public static class SonyOAuth
 
             var devices = await GetDevicesAsync(client, tokens.AccessToken!, cancellationToken).ConfigureAwait(false);
             var deviceId = await SelectDeviceAsync(devices, deviceSelector, cancellationToken).ConfigureAwait(false);
-            return await FetchSessionKeysAsync(
+            var credentials = await FetchSessionKeysAsync(
                 client,
                 tokens.AccessToken!,
                 deviceId,
@@ -202,6 +207,7 @@ public static class SonyOAuth
                 ClientId,
                 timeProvider ?? TimeProvider.System,
                 cancellationToken).ConfigureAwait(false);
+            return credentials with { DeviceUniqueId = devices.Single(device => device.DeviceId == deviceId).DeviceUniqueId };
         }
         finally
         {
@@ -217,7 +223,9 @@ public static class SonyOAuth
         CancellationToken cancellationToken = default,
         HttpClient? httpClient = null,
         TimeProvider? timeProvider = null,
-        Func<string, Task>? checkpointRotatedRefreshTokenAsync = null)
+        Func<string, Task>? checkpointRotatedRefreshTokenAsync = null,
+        Action<string>? diagnosticLog = null,
+        SonyDeviceSelector? reassociationSelector = null)
     {
         ArgumentNullException.ThrowIfNull(currentCredentials);
         if (string.IsNullOrWhiteSpace(currentCredentials.RefreshToken))
@@ -227,8 +235,10 @@ public static class SonyOAuth
 
         var ownsClient = httpClient == null;
         var client = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var phase = "OAuthRefresh";
         try
         {
+            LogRenewalDiagnostic(diagnosticLog, $"Phase={phase}; started.");
             using var request = new HttpRequestMessage(HttpMethod.Post, $"{AuthBaseUrl}/token");
             request.Headers.Add("User-Agent", TokenUserAgent);
             request.Content = new FormUrlEncodedContent(new Dictionary<string, string>
@@ -242,24 +252,96 @@ public static class SonyOAuth
             var refreshToken = string.IsNullOrWhiteSpace(tokens.RefreshToken)
                 ? currentCredentials.RefreshToken
                 : tokens.RefreshToken;
+            LogRenewalDiagnostic(diagnosticLog,
+                $"Phase={phase}; succeeded; RefreshTokenRotated={!string.Equals(refreshToken, currentCredentials.RefreshToken, StringComparison.Ordinal)}.");
             if (checkpointRotatedRefreshTokenAsync != null
                 && !string.Equals(refreshToken, currentCredentials.RefreshToken, StringComparison.Ordinal))
             {
+                phase = "RotatedTokenCheckpoint";
                 await checkpointRotatedRefreshTokenAsync(refreshToken).ConfigureAwait(false);
             }
-            return await FetchSessionKeysAsync(
-                client,
-                tokens.AccessToken!,
-                currentCredentials.DeviceId,
-                refreshToken,
-                currentCredentials.ClientId,
-                timeProvider ?? TimeProvider.System,
-                cancellationToken).ConfigureAwait(false);
+            phase = "SessionKeys";
+            LogRenewalDiagnostic(diagnosticLog, $"Phase={phase}; started.");
+            SonyCredentials renewed;
+            try
+            {
+                renewed = await FetchSessionKeysAsync(
+                    client, tokens.AccessToken!, currentCredentials.DeviceId, refreshToken,
+                    currentCredentials.ClientId, timeProvider ?? TimeProvider.System,
+                    cancellationToken).ConfigureAwait(false);
+                renewed = renewed with { DeviceUniqueId = currentCredentials.DeviceUniqueId };
+            }
+            catch (SonyOAuthException error) when (error.Kind == SonyOAuthFailureKind.Protocol && error.HttpStatusCode == 404)
+            {
+                // Only this stored association's 404 enters recovery, once per transaction.
+                LogRenewalDiagnostic(diagnosticLog, "Phase=SessionKeys; failed; Classification=Protocol; HTTP=404.");
+                phase = "DeviceDiscovery";
+                LogRenewalDiagnostic(diagnosticLog, $"Phase={phase}; started.");
+                var devices = await GetDevicesAsync(client, tokens.AccessToken!, cancellationToken).ConfigureAwait(false);
+                var storedPresent = devices.Any(device => device.DeviceId == currentCredentials.DeviceId);
+                var candidates = devices.Where(IsCompatibleReplacement).ToArray();
+                LogRenewalDiagnostic(diagnosticLog,
+                    $"Phase={phase}; succeeded; StoredDevicePresent={storedPresent}; AccessibleDevices={devices.Count}; CompatibleDevices={candidates.Length}.");
+                if (storedPresent || candidates.Length == 0)
+                    throw AssociationRequired();
+
+                SonyDeviceInfo replacement;
+                if (candidates.Length == 1
+                    && !string.IsNullOrWhiteSpace(currentCredentials.DeviceUniqueId)
+                    && string.Equals(candidates[0].DeviceUniqueId, currentCredentials.DeviceUniqueId, StringComparison.OrdinalIgnoreCase))
+                {
+                    replacement = candidates[0];
+                    LogRenewalDiagnostic(diagnosticLog, "ReplacementSelection=StoredUniqueIdentity.");
+                }
+                else
+                {
+                    if (reassociationSelector == null) throw AssociationRequired();
+                    phase = "DeviceSelection";
+                    var selectedId = await reassociationSelector(candidates, cancellationToken).ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    replacement = candidates.SingleOrDefault(device => device.DeviceId == selectedId)
+                        ?? throw AssociationRequired();
+                    LogRenewalDiagnostic(diagnosticLog, "ReplacementSelection=ExplicitUserChoice.");
+                }
+
+                phase = "ReplacementSessionKeys";
+                LogRenewalDiagnostic(diagnosticLog, $"Phase={phase}; started.");
+                renewed = await FetchSessionKeysAsync(
+                    client, tokens.AccessToken!, replacement.DeviceId, refreshToken,
+                    currentCredentials.ClientId, timeProvider ?? TimeProvider.System,
+                    cancellationToken).ConfigureAwait(false);
+                renewed = renewed with { DeviceUniqueId = replacement.DeviceUniqueId };
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            LogRenewalDiagnostic(diagnosticLog, $"Phase={phase}; succeeded; ExpiresAtUtc={renewed.SessionKeysExpiresAtUtc:O}.");
+            return renewed;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            LogRenewalDiagnostic(diagnosticLog, $"Phase={phase}; cancelled.");
+            throw;
+        }
+        catch (SonyOAuthException error)
+        {
+            LogRenewalDiagnostic(diagnosticLog,
+                $"Phase={phase}; failed; Classification={error.Kind}; HTTP={error.HttpStatusCode?.ToString(CultureInfo.InvariantCulture) ?? "unavailable"}.");
+            throw;
+        }
+        catch (Exception error)
+        {
+            LogRenewalDiagnostic(diagnosticLog, $"Phase={phase}; failed; ExceptionType={error.GetType().Name}.");
+            throw;
         }
         finally
         {
             if (ownsClient) client.Dispose();
         }
+    }
+
+    internal static void LogRenewalDiagnostic(Action<string>? log, string message)
+    {
+        try { log?.Invoke($"[Credential renewal] {message}"); }
+        catch { /* Diagnostics must not affect credential renewal or persistence. */ }
     }
 
     private static async Task<SonyTokenResponse> ExchangeAuthorizationCodeAsync(
@@ -306,18 +388,18 @@ public static class SonyOAuth
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw Transient($"Sony token {operation} timed out.");
+            throw Transient($"Sony token {operation} timed out.", httpStatusCode: (int)response.StatusCode);
         }
         catch (HttpRequestException error)
         {
-            throw Transient($"Sony token {operation} was interrupted.", error);
+            throw Transient($"Sony token {operation} was interrupted.", error, (int)response.StatusCode);
         }
         catch (IOException error)
         {
-            throw Transient($"Sony token {operation} was interrupted.", error);
+            throw Transient($"Sony token {operation} was interrupted.", error, (int)response.StatusCode);
         }
 
-        throw Protocol("Sony returned an invalid token response.");
+        throw Protocol("Sony returned an invalid token response.", (int)response.StatusCode);
     }
 
     private static async Task<IReadOnlyList<SonyDeviceInfo>> GetDevicesAsync(
@@ -335,35 +417,51 @@ public static class SonyOAuth
             using var readCancellation = CreateResponseReadCancellation(cancellationToken);
             await using var stream = await response.Content.ReadAsStreamAsync(readCancellation.Token).ConfigureAwait(false);
             using var document = await JsonDocument.ParseAsync(stream, cancellationToken: readCancellation.Token).ConfigureAwait(false);
-            if (!document.RootElement.TryGetProperty("devices", out var array) || array.ValueKind != JsonValueKind.Array)
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("devices", out var array) || array.ValueKind != JsonValueKind.Array)
                 throw new JsonException();
 
             var result = new List<SonyDeviceInfo>();
             foreach (var item in array.EnumerateArray())
             {
+                if (item.ValueKind != JsonValueKind.Object) throw new JsonException();
                 var id = GetString(item, "device_id");
-                if (string.IsNullOrWhiteSpace(id)) continue;
+                // A partial or ambiguous list cannot prove that the stored association disappeared.
+                if (string.IsNullOrWhiteSpace(id) || result.Any(device => device.DeviceId == id)) throw new JsonException();
                 var type = GetString(item, "device_type") ?? "Sony device";
-                var name = GetString(item, "device_name") ?? GetString(item, "name") ?? GetString(item, "model_name") ?? type;
-                result.Add(new SonyDeviceInfo(id, name, type));
+                var attributes = GetOptionalObject(item, "attributes");
+                var infos = GetOptionalObject(item, "device_infos");
+                var uniqueId = GetString(attributes, "device_unique_id");
+                if (!string.IsNullOrWhiteSpace(uniqueId)
+                    && result.Any(device => string.Equals(device.DeviceUniqueId, uniqueId, StringComparison.OrdinalIgnoreCase)))
+                    throw new JsonException();
+                var identifiedModel = GetString(attributes, "identified_model_name");
+                var reportedModel = GetString(infos, "model_name") ?? GetString(infos, "name");
+                if (SupportedModel(identifiedModel) is { } identified
+                    && SupportedModel(reportedModel) is { } reported && identified != reported)
+                    throw new JsonException();
+                var model = identifiedModel ?? reportedModel;
+                var name = GetString(infos, "model_name") ?? GetString(item, "device_name")
+                    ?? GetString(item, "name") ?? GetString(item, "model_name") ?? model ?? type;
+                result.Add(new SonyDeviceInfo(id, name, type, uniqueId, model));
             }
             return result;
         }
         catch (JsonException)
         {
-            throw Protocol("Sony returned an invalid device list.");
+            throw Protocol("Sony returned an invalid device list.", (int)response.StatusCode);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw Transient("Sony device query timed out.");
+            throw Transient("Sony device query timed out.", httpStatusCode: (int)response.StatusCode);
         }
         catch (HttpRequestException error)
         {
-            throw Transient("Sony device query was interrupted.", error);
+            throw Transient("Sony device query was interrupted.", error, (int)response.StatusCode);
         }
         catch (IOException error)
         {
-            throw Transient("Sony device query was interrupted.", error);
+            throw Transient("Sony device query was interrupted.", error, (int)response.StatusCode);
         }
     }
 
@@ -432,24 +530,47 @@ public static class SonyOAuth
         }
         catch (JsonException)
         {
-            throw Protocol("Sony returned an invalid session-key response.");
+            throw Protocol("Sony returned an invalid session-key response.", (int)response.StatusCode);
         }
         catch (ArgumentOutOfRangeException)
         {
-            throw Protocol("Sony returned an invalid session-key expiry.");
+            throw Protocol("Sony returned an invalid session-key expiry.", (int)response.StatusCode);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw Transient("Sony session-key request timed out.");
+            throw Transient("Sony session-key request timed out.", httpStatusCode: (int)response.StatusCode);
         }
         catch (HttpRequestException error)
         {
-            throw Transient("Sony session-key request was interrupted.", error);
+            throw Transient("Sony session-key request was interrupted.", error, (int)response.StatusCode);
         }
         catch (IOException error)
         {
-            throw Transient("Sony session-key request was interrupted.", error);
+            throw Transient("Sony session-key request was interrupted.", error, (int)response.StatusCode);
         }
+    }
+
+    private static bool IsCompatibleReplacement(SonyDeviceInfo device) =>
+        device.DeviceType.Equals("Speaker", StringComparison.OrdinalIgnoreCase)
+        && SupportedModel(device.ModelName) != null;
+
+    private static string? SupportedModel(string? model) => model?.ToUpperInvariant() switch
+    {
+        "HT-A9000" or "BRAVIA THEATRE BAR 9" => "HT-A9000",
+        "HT-A8000" or "BRAVIA THEATRE BAR 8" => "HT-A8000",
+        "HT-A9M2" or "BRAVIA THEATRE QUAD" => "HT-A9M2",
+        _ => null
+    };
+
+    private static SonyOAuthException AssociationRequired() =>
+        new(SonyOAuthFailureKind.DeviceAssociationRequired, "The Sony soundbar association needs attention.");
+
+    private static JsonElement GetOptionalObject(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value) || value.ValueKind == JsonValueKind.Null)
+            return default;
+        if (value.ValueKind != JsonValueKind.Object) throw new JsonException();
+        return value;
     }
 
     private static HttpRequestMessage CreateIotRequest(HttpMethod method, string uri, string accessToken)
@@ -489,10 +610,10 @@ public static class SonyOAuth
     {
         var status = (int)response.StatusCode;
         if (status is 408 or 429 or >= 500)
-            return Transient($"{operation} is temporarily unavailable (HTTP {status}).");
+            return Transient($"{operation} is temporarily unavailable (HTTP {status}).", httpStatusCode: status);
         if (tokenEndpoint && await HasInvalidGrantAsync(response, cancellationToken).ConfigureAwait(false))
-            return new(SonyOAuthFailureKind.ReauthenticationRequired, "Sony authorization is no longer valid.");
-        return Protocol($"{operation} returned an unexpected response (HTTP {status}).");
+            return new(SonyOAuthFailureKind.ReauthenticationRequired, "Sony authorization is no longer valid.", httpStatusCode: status);
+        return Protocol($"{operation} returned an unexpected response (HTTP {status}).", status);
     }
 
     private static async Task<bool> HasInvalidGrantAsync(
@@ -512,15 +633,15 @@ public static class SonyOAuth
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw Transient("Sony token error response timed out.");
+            throw Transient("Sony token error response timed out.", httpStatusCode: (int)response.StatusCode);
         }
         catch (HttpRequestException error)
         {
-            throw Transient("Sony token error response was interrupted.", error);
+            throw Transient("Sony token error response was interrupted.", error, (int)response.StatusCode);
         }
         catch (IOException error)
         {
-            throw Transient("Sony token error response was interrupted.", error);
+            throw Transient("Sony token error response was interrupted.", error, (int)response.StatusCode);
         }
     }
 
@@ -557,14 +678,14 @@ public static class SonyOAuth
         return cancellation;
     }
 
-    private static SonyOAuthException Transient(string message, Exception? innerException = null) =>
-        new(SonyOAuthFailureKind.Transient, message, innerException);
+    private static SonyOAuthException Transient(string message, Exception? innerException = null, int? httpStatusCode = null) =>
+        new(SonyOAuthFailureKind.Transient, message, innerException, httpStatusCode);
 
-    private static SonyOAuthException Protocol(string message) =>
-        new(SonyOAuthFailureKind.Protocol, message);
+    private static SonyOAuthException Protocol(string message, int? httpStatusCode = null) =>
+        new(SonyOAuthFailureKind.Protocol, message, httpStatusCode: httpStatusCode);
 
     private static string? GetString(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
 

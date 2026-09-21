@@ -39,6 +39,11 @@ public sealed record SonyCredentials
     [JsonPropertyName("device_id")]
     public string? DeviceId { get; init; }
 
+    /// <summary>Sony's independent identity learned from the selected cloud association.</summary>
+    [JsonPropertyName("device_unique_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeviceUniqueId { get; init; }
+
     [JsonPropertyName("session_keys_expires_at_utc")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? SessionKeysExpiresAtUtc { get; init; }
