@@ -435,6 +435,17 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                         Log($"Authenticated handshake failed: StatusCode={ex.StatusCode}, Classification={classification}.");
                         throw;
                     }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        // A malformed device response (for example a session random of the
+                        // wrong length, or an hmac_key that is not usable) is not a transport
+                        // fault. Classifying it here keeps it out of the generic connection
+                        // handler, which reported only an exception type name and gave no
+                        // indication that the device, not the network, is at fault.
+                        Log($"Authenticated handshake failed: ExceptionType={DescribeFailure(ex)}, Classification=protocol_failure. Retrying without requiring sign-in.");
+                        authRequired = false;
+                        break;
+                    }
                 }
 
                 if (initialized && client != null)
