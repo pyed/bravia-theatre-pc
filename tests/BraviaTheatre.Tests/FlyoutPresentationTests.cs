@@ -161,6 +161,30 @@ public class FlyoutPresentationTests
     }
 
     [Fact]
+    public void ChangedDeviceAssociationOffersSelectionWithoutRequiringSonySignIn()
+    {
+        var presentation = SoundbarUiPresentationFactory.Create(
+            SoundbarState.Disconnected with { DeviceAssociationRequired = true });
+
+        Assert.True(presentation.ShowDeviceAssociationPrompt);
+        Assert.False(presentation.ShowAuthenticationPrompt);
+        Assert.False(presentation.ControlsEnabled);
+        Assert.Contains("Choose your soundbar", presentation.TrayTooltip, StringComparison.Ordinal);
+        Assert.Contains("Choose your soundbar", presentation.TrayMenuHeader, StringComparison.Ordinal);
+        Assert.DoesNotContain("sign-in", presentation.TrayTooltip, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ExplicitAuthorizationRejectionTakesPriorityOverDeviceSelection()
+    {
+        var presentation = SoundbarUiPresentationFactory.Create(
+            SoundbarState.Disconnected with { AuthRequired = true, DeviceAssociationRequired = true });
+
+        Assert.True(presentation.ShowAuthenticationPrompt);
+        Assert.False(presentation.ShowDeviceAssociationPrompt);
+    }
+
+    [Fact]
     public void LaterDistinctTrayClickReopensWhileClosing()
     {
         var controller = new FlyoutTransitionController();

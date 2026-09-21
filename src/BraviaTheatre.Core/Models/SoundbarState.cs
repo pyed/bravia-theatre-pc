@@ -16,6 +16,7 @@ public sealed record SoundbarState
     public string? Channel { get; init; }
     public string? Input { get; init; }
     public bool AuthRequired { get; init; }
+    public bool DeviceAssociationRequired { get; init; }
     public string? DeviceName { get; init; }
 
     public string CodecBadgeKind => !Connected ? "idle" : Power ? CodecTaxonomy.Classify(Codec) : "standby";

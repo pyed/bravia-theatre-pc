@@ -6,7 +6,8 @@ public enum CredentialRenewalStatus
     Unavailable,
     AuthenticationRequired,
     TransientFailure,
-    Failed
+    Failed,
+    DeviceAssociationRequired
 }
 
 public sealed record CredentialRenewalResult(
@@ -23,7 +24,7 @@ public sealed class SonyCredentialLifecycle
         CredentialRenewalResult Result);
 
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly Func<SonyCredentials, Func<string, Task>, CancellationToken, Task<SonyCredentials>> _renewCredentialsAsync;
+    private readonly Func<SonyCredentials, Func<string, Task>, CancellationToken, SonyDeviceSelector?, Task<SonyCredentials>> _renewCredentialsAsync;
     private readonly Func<SonyCredentials, CancellationToken, Task> _persistCredentialsAsync;
     private SonyCredentials? _currentCredentials;
     private SonyCredentials? _pendingLocalKeyRefreshCredentials;
@@ -34,6 +35,17 @@ public sealed class SonyCredentialLifecycle
         SonyCredentials? initialCredentials,
         Func<SonyCredentials, Func<string, Task>, CancellationToken, Task<SonyCredentials>> renewCredentialsAsync,
         Func<SonyCredentials, CancellationToken, Task> persistCredentialsAsync)
+        : this(initialCredentials,
+            (credentials, checkpoint, cancellationToken, _) => renewCredentialsAsync(credentials, checkpoint, cancellationToken),
+            persistCredentialsAsync)
+    {
+        ArgumentNullException.ThrowIfNull(renewCredentialsAsync);
+    }
+
+    public SonyCredentialLifecycle(
+        SonyCredentials? initialCredentials,
+        Func<SonyCredentials, Func<string, Task>, CancellationToken, SonyDeviceSelector?, Task<SonyCredentials>> renewCredentialsAsync,
+        Func<SonyCredentials, CancellationToken, Task> persistCredentialsAsync)
     {
         _currentCredentials = initialCredentials;
         _renewCredentialsAsync = renewCredentialsAsync ?? throw new ArgumentNullException(nameof(renewCredentialsAsync));
@@ -41,6 +53,7 @@ public sealed class SonyCredentialLifecycle
     }
 
     public SonyCredentials? CurrentCredentials => Volatile.Read(ref _currentCredentials);
+    public Action<string>? DiagnosticLog { get; set; }
 
     public bool IsLocalKeyRefreshPending(SonyCredentials credentials) =>
         ReferenceEquals(Volatile.Read(ref _pendingLocalKeyRefreshCredentials), credentials);
@@ -83,7 +96,8 @@ public sealed class SonyCredentialLifecycle
 
     public async Task<CredentialRenewalResult> RefreshAsync(
         SonyCredentials expected,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SonyDeviceSelector? reassociationSelector = null)
     {
         ArgumentNullException.ThrowIfNull(expected);
         var observedAttemptVersion = Volatile.Read(ref _refreshAttemptVersion);
@@ -94,7 +108,8 @@ public sealed class SonyCredentialLifecycle
             if (_lastRefreshAttempt is { } lastAttempt
                 && ReferenceEquals(current, lastAttempt.Current)
                 && (lastAttempt.Version > observedAttemptVersion
-                    || lastAttempt.Result.Status == CredentialRenewalStatus.AuthenticationRequired))
+                    || lastAttempt.Result.Status == CredentialRenewalStatus.AuthenticationRequired)
+                && !(reassociationSelector != null && lastAttempt.Result.Status == CredentialRenewalStatus.DeviceAssociationRequired))
             {
                 return lastAttempt.Result;
             }
@@ -107,6 +122,8 @@ public sealed class SonyCredentialLifecycle
             if (string.IsNullOrWhiteSpace(current.RefreshToken) || string.IsNullOrWhiteSpace(current.DeviceId))
                 return new(CredentialRenewalStatus.Unavailable, Diagnostic: "Silent Sony credential renewal is unavailable.");
 
+            SonyOAuth.LogRenewalDiagnostic(DiagnosticLog,
+                $"RenewalStarting; ExpiresAtUtc={current.SessionKeysExpiresAtUtc:O}; RenewalMaterialAvailable=True; PendingCheckpoint={IsLocalKeyRefreshPending(current)}.");
             SonyCredentials? durableCheckpoint = null;
 
             async Task CheckpointRotatedRefreshTokenAsync(string refreshToken)
@@ -120,7 +137,7 @@ public sealed class SonyCredentialLifecycle
 
                 // Once Sony may have invalidated the old token, this brief atomic write must
                 // complete even if the connection that initiated renewal is shutting down.
-                await _persistCredentialsAsync(checkpoint, CancellationToken.None).ConfigureAwait(false);
+                await PersistRenewalAsync(checkpoint, CancellationToken.None, "RotatedTokenCheckpoint").ConfigureAwait(false);
                 durableCheckpoint = checkpoint;
             }
 
@@ -130,7 +147,8 @@ public sealed class SonyCredentialLifecycle
                 renewed = await _renewCredentialsAsync(
                     current,
                     CheckpointRotatedRefreshTokenAsync,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    reassociationSelector).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -146,13 +164,16 @@ public sealed class SonyCredentialLifecycle
                         new(CredentialRenewalStatus.AuthenticationRequired, Diagnostic: "Sony authorization must be renewed interactively."),
                     SonyOAuthFailureKind.Transient =>
                         new(CredentialRenewalStatus.TransientFailure, Diagnostic: "Sony credential renewal is temporarily unavailable."),
+                    SonyOAuthFailureKind.DeviceAssociationRequired =>
+                        new(CredentialRenewalStatus.DeviceAssociationRequired, Diagnostic: "The Sony soundbar association needs attention."),
                     _ => Failed("Sony returned an invalid credential-renewal response.")
                 };
                 return CompleteAttempt(result);
             }
-            catch
+            catch (Exception error)
             {
                 PublishCheckpoint(durableCheckpoint);
+                SonyOAuth.LogRenewalDiagnostic(DiagnosticLog, $"Phase=Renewal; failed; ExceptionType={error.GetType().Name}.");
                 return CompleteAttempt(Failed("Sony credential renewal failed."));
             }
 
@@ -170,7 +191,8 @@ public sealed class SonyCredentialLifecycle
 
             try
             {
-                await _persistCredentialsAsync(renewed, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                await PersistRenewalAsync(renewed, cancellationToken, "FinalPersistence").ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -193,6 +215,21 @@ public sealed class SonyCredentialLifecycle
         }
     }
 
+    private async Task PersistRenewalAsync(SonyCredentials credentials, CancellationToken cancellationToken, string phase)
+    {
+        SonyOAuth.LogRenewalDiagnostic(DiagnosticLog, $"Phase={phase}; started.");
+        try
+        {
+            await _persistCredentialsAsync(credentials, cancellationToken).ConfigureAwait(false);
+            SonyOAuth.LogRenewalDiagnostic(DiagnosticLog, $"Phase={phase}; succeeded; Persisted=True.");
+        }
+        catch (Exception error)
+        {
+            SonyOAuth.LogRenewalDiagnostic(DiagnosticLog, $"Phase={phase}; failed; Persisted=False; ExceptionType={error.GetType().Name}.");
+            throw;
+        }
+    }
+
     private void PublishCheckpoint(SonyCredentials? checkpoint)
     {
         if (checkpoint is null)
@@ -204,6 +241,7 @@ public sealed class SonyCredentialLifecycle
 
     private CredentialRenewalResult CompleteAttempt(CredentialRenewalResult result)
     {
+        SonyOAuth.LogRenewalDiagnostic(DiagnosticLog, $"RenewalCompleted; Status={result.Status}; Diagnostic={result.Diagnostic ?? "none"}.");
         var version = Interlocked.Increment(ref _refreshAttemptVersion);
         _lastRefreshAttempt = new(version, Volatile.Read(ref _currentCredentials), result);
         return result;

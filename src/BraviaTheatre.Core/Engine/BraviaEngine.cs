@@ -47,6 +47,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
     private int _maxConcurrentCommandDrainReaders;
     private long _nextConnectionGeneration;
     private SonyCredentials? _authenticationRequiredCredentials;
+    private SonyCredentials? _deviceAssociationRequiredCredentials;
     private SonyCredentials? _refreshSuppressedCredentials;
     private SonyCredentials? _proactiveRenewalSuppressedCredentials;
 
@@ -156,6 +157,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             credentials = renewal.Credentials;
             authRequired = false;
             _authenticationRequiredCredentials = null;
+            _deviceAssociationRequiredCredentials = null;
             _refreshSuppressedCredentials = null;
             _proactiveRenewalSuppressedCredentials = IsNearingExpiry(credentials)
                 ? credentials
@@ -181,9 +183,15 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 Log("Silent credential renewal unavailable; trying the current local credentials.");
                 return true;
             case CredentialRenewalStatus.AuthenticationRequired:
+                _deviceAssociationRequiredCredentials = null;
                 _authenticationRequiredCredentials = credentials;
                 authRequired = true;
                 Log("Sony authorization was rejected; interactive authentication required.");
+                return false;
+            case CredentialRenewalStatus.DeviceAssociationRequired:
+                _deviceAssociationRequiredCredentials = CurrentCredentials;
+                authRequired = false;
+                Log("Sony soundbar association needs attention; account authorization remains available.");
                 return false;
             case CredentialRenewalStatus.TransientFailure:
                 authRequired = false;
@@ -284,6 +292,8 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 }
                 if (!ReferenceEquals(credentials, _refreshSuppressedCredentials))
                     _refreshSuppressedCredentials = null;
+                if (!ReferenceEquals(credentials, _deviceAssociationRequiredCredentials))
+                    _deviceAssociationRequiredCredentials = null;
                 if (!ReferenceEquals(credentials, _proactiveRenewalSuppressedCredentials))
                     _proactiveRenewalSuppressedCredentials = null;
 
@@ -292,11 +302,19 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     authRequired = true;
                     readyToConnect = false;
                 }
+                else if (ReferenceEquals(credentials, _deviceAssociationRequiredCredentials))
+                {
+                    // Only replacement credentials can resolve this snapshot, so retrying would
+                    // re-exchange the refresh token and re-read the device list on every backoff
+                    // to reach the same decision that is waiting on the user.
+                    authRequired = false;
+                    readyToConnect = false;
+                }
                 else if (_credentialLifecycle != null
                     && IsNearingExpiry(credentials)
                     && !ReferenceEquals(credentials, _proactiveRenewalSuppressedCredentials))
                 {
-                    Log("Local credentials nearing expiry; refreshing before authenticated connect.");
+                    Log("[Credential renewal] Trigger=proactive; local credentials nearing expiry; refreshing before authenticated connect.");
                     var renewal = await _credentialLifecycle.RefreshAsync(credentials, connectionCts.Token);
                     preflightRenewalStatus = renewal.Status;
                     readyToConnect = TryUseRenewalResult(
@@ -385,7 +403,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                             break;
                         }
 
-                        Log("Authenticated handshake rejected; attempting one credential refresh.");
+                        Log("[Credential renewal] Trigger=reactive; authenticated handshake rejected; attempting one credential refresh.");
                         var renewal = await _credentialLifecycle.RefreshAsync(credentials, connectionCts.Token);
                         if (!TryUseRenewalResult(
                                 renewal,
@@ -477,7 +495,8 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     Log($"Connection cancellation warning: {DescribeFailure(ex)}");
                 }
 
-                SetDisconnectedState(connectionGeneration, authRequired);
+                SetDisconnectedState(connectionGeneration, authRequired,
+                    ReferenceEquals(CurrentCredentials, _deviceAssociationRequiredCredentials));
 
                 try
                 {
@@ -611,7 +630,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             _fieldRevisions.Clear();
             _stateRevision++;
 
-            var next = _currentState with { Connected = true, DeviceName = deviceName, AuthRequired = false };
+            var next = _currentState with { Connected = true, DeviceName = deviceName, AuthRequired = false, DeviceAssociationRequired = false };
             if (next != _currentState)
             {
                 _currentState = next;
@@ -625,7 +644,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         }
     }
 
-    private void SetDisconnectedState(long? connectionGeneration = null, bool authRequired = false)
+    private void SetDisconnectedState(long? connectionGeneration = null, bool authRequired = false, bool deviceAssociationRequired = false)
     {
         SoundbarState? disconnectedState = null;
 
@@ -643,7 +662,11 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             _fieldRevisions.Clear();
             _stateRevision++;
 
-            var disconnected = SoundbarState.Disconnected with { AuthRequired = authRequired };
+            var disconnected = SoundbarState.Disconnected with
+            {
+                AuthRequired = authRequired,
+                DeviceAssociationRequired = !authRequired && deviceAssociationRequired
+            };
             if (_currentState != disconnected)
             {
                 _currentState = disconnected;
