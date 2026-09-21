@@ -64,6 +64,14 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
     private long _stateRevision;
     private readonly Dictionary<string, long> _fieldRevisions = new();
 
+    // Subscribers are invoked outside _stateLock, so two threads that mutate different
+    // fields can otherwise deliver an older snapshot after a newer one. Every published
+    // snapshot carries the sequence it was stamped with under _stateLock, and delivery
+    // is serialized so a superseded snapshot is dropped instead of arriving late.
+    private readonly object _publishLock = new();
+    private long _publishSequence;
+    private long _publishedSequence;
+
     public event Action<SoundbarState>? StateChanged;
     public Action<string>? LogAction { get; set; }
 
@@ -634,6 +642,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
     private void ActivateConnection(long connectionGeneration, string deviceName)
     {
         SoundbarState? connectedState = null;
+        var sequence = 0L;
 
         lock (_stateLock)
         {
@@ -646,18 +655,20 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             {
                 _currentState = next;
                 connectedState = next;
+                sequence = ++_publishSequence;
             }
         }
 
         if (connectedState != null)
         {
-            PublishState(connectedState);
+            PublishState(connectedState, sequence);
         }
     }
 
     private void SetDisconnectedState(long? connectionGeneration = null, bool authRequired = false, bool deviceAssociationRequired = false)
     {
         SoundbarState? disconnectedState = null;
+        var sequence = 0L;
 
         lock (_stateLock)
         {
@@ -682,12 +693,13 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             {
                 _currentState = disconnected;
                 disconnectedState = _currentState;
+                sequence = ++_publishSequence;
             }
         }
 
         if (disconnectedState != null)
         {
-            PublishState(disconnectedState);
+            PublishState(disconnectedState, sequence);
         }
     }
 
@@ -701,26 +713,27 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         }
     }
 
-    private void PublishState(SoundbarState state)
+    private void PublishState(SoundbarState state, long sequence)
     {
-        lock (_stateLock)
+        lock (_publishLock)
         {
-            if (_currentState != state)
+            if (sequence <= _publishedSequence)
                 return;
-        }
+            _publishedSequence = sequence;
 
-        var handlers = StateChanged;
-        if (handlers == null) return;
+            var handlers = StateChanged;
+            if (handlers == null) return;
 
-        foreach (Action<SoundbarState> handler in handlers.GetInvocationList())
-        {
-            try
+            foreach (Action<SoundbarState> handler in handlers.GetInvocationList())
             {
-                handler(state);
-            }
-            catch (Exception ex)
-            {
-                Log($"StateChanged subscriber warning: {DescribeFailure(ex)}");
+                try
+                {
+                    handler(state);
+                }
+                catch (Exception ex)
+                {
+                    Log($"StateChanged subscriber warning: {DescribeFailure(ex)}");
+                }
             }
         }
     }
@@ -894,6 +907,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         long baselineRevision)
     {
         SoundbarState? stateToPublish = null;
+        var sequence = 0L;
 
         lock (_stateLock)
         {
@@ -1057,11 +1071,12 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             {
                 _currentState = next;
                 stateToPublish = next;
+                sequence = ++_publishSequence;
             }
         }
 
         if (stateToPublish != null)
-            PublishState(stateToPublish);
+            PublishState(stateToPublish, sequence);
     }
 
     internal void ApplyDelta(string path, object? value) => ApplyDeltaCore(null, path, value);
@@ -1072,6 +1087,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
     private void ApplyDeltaCore(long? connectionGeneration, string path, object? value)
     {
         SoundbarState? stateToPublish = null;
+        var sequence = 0L;
 
         lock (_stateLock)
         {
@@ -1164,11 +1180,12 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             {
                 _currentState = next;
                 stateToPublish = next;
+                sequence = ++_publishSequence;
             }
         }
 
         if (stateToPublish != null)
-            PublishState(stateToPublish);
+            PublishState(stateToPublish, sequence);
     }
 
     private void MarkFieldsLocked(IEnumerable<string> fields)
@@ -1328,6 +1345,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         params string[] updatedFields)
     {
         SoundbarState? stateToPublish;
+        long sequence;
 
         lock (_stateLock)
         {
@@ -1351,9 +1369,10 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             _currentState = transitionResult.Value.State;
             MarkFieldsLocked(updatedFields);
             stateToPublish = _currentState;
+            sequence = ++_publishSequence;
         }
 
-        PublishState(stateToPublish);
+        PublishState(stateToPublish, sequence);
         return true;
     }
 

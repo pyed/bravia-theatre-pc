@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.IO;
 using BraviaTheatre.Core.Auth;
 using BraviaTheatre.Core.Engine;
+using BraviaTheatre.Core.Models;
 using BraviaTheatre.Core.Wire;
 
 namespace BraviaTheatre.Tests;
@@ -27,15 +28,20 @@ public sealed class EngineFailureClassificationTests
     public async Task NonRpcHandshakeFailureIsClassifiedAsProtocolFailure(Type failureType)
     {
         var logs = new ConcurrentQueue<string>();
+        var attempts = 0;
         var observed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var engine = new BraviaEngine(
             ValidCredentials(),
             "test-host",
             55051,
-            (_, _, _) => new EngineRegressionTests.FakeBraviaClient
+            (_, _, _) =>
             {
-                InitFailure = (Exception)Activator.CreateInstance(failureType)!
+                Interlocked.Increment(ref attempts);
+                return new EngineRegressionTests.FakeBraviaClient
+                {
+                    InitFailure = (Exception)Activator.CreateInstance(failureType)!
+                };
             },
             static (_, ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct));
 
@@ -90,5 +96,61 @@ public sealed class EngineFailureClassificationTests
         var parsed = PacketSigner.ParseHmacKey(key);
 
         Assert.Equal(Convert.FromHexString(key), parsed);
+    }
+
+    // Subscribers are invoked outside the state lock, so two threads mutating different
+    // fields could deliver an older snapshot after a newer one.
+    [Fact]
+    public async Task ConcurrentUpdatesNeverPublishAStaleSnapshot()
+    {
+        const int Updates = 20000;
+
+        using var engine = new BraviaEngine(ValidCredentials(), "test-host", 55051);
+        engine.ApplySnapshot(
+            new Dictionary<string, object?>
+            {
+                ["power"] = true,
+                ["volume"] = 0,
+                ["sound_setting.volume.rear"] = 0
+            },
+            "test-device");
+
+        var gate = new object();
+        var highestSeen = 0;
+        var inversions = 0;
+        SoundbarState? lastPublished = null;
+
+        engine.StateChanged += state =>
+        {
+            lock (gate)
+            {
+                if (state.Volume < highestSeen) inversions++;
+                else highestSeen = state.Volume;
+                lastPublished = state;
+            }
+        };
+
+        // Volume is written by exactly one writer and only ever increases, so any
+        // published volume below one already published proves out-of-order delivery.
+        var volumeWriter = Task.Run(
+            () =>
+            {
+                for (var i = 1; i <= Updates; i++) engine.ApplyDelta("volume", i);
+            },
+            TestContext.Current.CancellationToken);
+        var rearWriter = Task.Run(
+            () =>
+            {
+                for (var i = 1; i <= Updates; i++) engine.ApplyDelta("sound_setting.volume.rear", i % 10);
+            },
+            TestContext.Current.CancellationToken);
+
+        await Task.WhenAll(volumeWriter, rearWriter);
+
+        lock (gate)
+        {
+            Assert.Equal(0, inversions);
+            Assert.Equal(engine.CurrentState, lastPublished);
+        }
     }
 }
