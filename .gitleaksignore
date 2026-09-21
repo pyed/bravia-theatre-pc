@@ -1,0 +1,11 @@
+# Known findings that are not credentials, pinned to one commit, file, rule, and line.
+#
+# A fingerprint here suppresses exactly that occurrence. It cannot hide the same
+# pattern in another commit, file, or line, so the rules stay as strict as they are.
+#
+# v2.2.2 shipped a synthetic key id in a credential-rotation test. v2.2.3 renamed it
+# to "key2" in the working tree, but the value stays in that commit's history forever
+# and published release tags are built from it, so history is not rewritten. Only a
+# full-history scan reaches it: gitleaks-action scans a commit range for push and
+# pull_request events, and all history for workflow_dispatch.
+88245433b873ba0b4983e78b880e0b944ad598ff:tests/BraviaTheatre.Tests/AuthHardeningTests.cs:sony-session-id-literal:497
