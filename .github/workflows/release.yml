@@ -50,7 +50,7 @@ jobs:
         run: dotnet test BraviaTheatrePC.sln -c Release --no-restore -warnaserror -p:Version=$env:RELEASE_VERSION
 
       - name: Publish standalone executable
-        run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained --no-restore -p:Version=$env:RELEASE_VERSION -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o publish/standalone
+        run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained --no-restore -p:Version=$env:RELEASE_VERSION -p:PublishSingleFile=true -p:DebugType=none -o publish/standalone
 
       - name: Publish framework-dependent executable
         run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --no-self-contained --no-restore -p:Version=$env:RELEASE_VERSION -p:PublishSingleFile=true -p:DebugType=none -o publish/framework-dependent
@@ -60,16 +60,27 @@ jobs:
         run: |
           Move-Item -LiteralPath "publish/framework-dependent/BraviaTheatrePC.exe" -Destination "publish/BraviaTheatrePC-FrameworkDependent.exe"
           Move-Item -LiteralPath "publish/standalone/BraviaTheatrePC.exe" -Destination "publish/BraviaTheatrePC.exe"
+
+          # The standalone executable is published uncompressed so its assemblies can be
+          # mapped instead of decompressed into private memory. Zipping it for transport
+          # keeps the download the same size as the old compressed single file.
+          Compress-Archive -LiteralPath "publish/BraviaTheatrePC.exe" -DestinationPath "publish/BraviaTheatrePC.zip" -CompressionLevel Optimal -Force
+
           $standaloneHash = (Get-FileHash -LiteralPath "publish/BraviaTheatrePC.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $zipHash = (Get-FileHash -LiteralPath "publish/BraviaTheatrePC.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
           $frameworkHash = (Get-FileHash -LiteralPath "publish/BraviaTheatrePC-FrameworkDependent.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
           Set-Content -LiteralPath "publish/BraviaTheatrePC.exe.sha256" -Value "$standaloneHash  BraviaTheatrePC.exe" -Encoding utf8NoBOM
+          Set-Content -LiteralPath "publish/BraviaTheatrePC.zip.sha256" -Value "$zipHash  BraviaTheatrePC.zip" -Encoding utf8NoBOM
           Set-Content -LiteralPath "publish/BraviaTheatrePC-FrameworkDependent.exe.sha256" -Value "$frameworkHash  BraviaTheatrePC-FrameworkDependent.exe" -Encoding utf8NoBOM
 
       - name: Attest release executables
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
+          # The executable inside the zip is attested too, so `gh attestation verify`
+          # still works once it has been extracted.
           subject-path: |
             publish/BraviaTheatrePC.exe
+            publish/BraviaTheatrePC.zip
             publish/BraviaTheatrePC-FrameworkDependent.exe
 
       - name: Create GitHub release
@@ -80,7 +91,8 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            publish/BraviaTheatrePC.exe
+            publish/BraviaTheatrePC.zip
+            publish/BraviaTheatrePC.zip.sha256
             publish/BraviaTheatrePC.exe.sha256
             publish/BraviaTheatrePC-FrameworkDependent.exe
             publish/BraviaTheatrePC-FrameworkDependent.exe.sha256

@@ -52,10 +52,10 @@ Compatibility can vary by model and firmware. Reports with model and firmware de
 
 ### Release executable
 
-Download the appropriate executable from [GitHub Releases](../../releases):
+Download the appropriate build from [GitHub Releases](../../releases):
 
-- `BraviaTheatrePC.exe` is self-contained and does not require a separately installed .NET runtime.
-- `BraviaTheatrePC-FrameworkDependent.exe` requires the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0).
+- `BraviaTheatrePC.zip` contains the self-contained `BraviaTheatrePC.exe` and does not require a separately installed .NET runtime. Extract it before running. The executable is stored uncompressed so Windows can map its assemblies from disk instead of unpacking them into memory, which is why it is distributed in a zip rather than as a bare download.
+- `BraviaTheatrePC-FrameworkDependent.exe` requires the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) and is a much smaller download.
 
 Run the executable and complete Sony sign-in when prompted.
 
