@@ -17,7 +17,9 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseding a branch or pull-request run saves nothing that matters, but main's
+  # run is the record of whether a released commit was verified, so let it finish.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   secret-scan:
