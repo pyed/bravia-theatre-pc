@@ -169,7 +169,11 @@ public sealed class GlobalHotkeyService : IDisposable
     private static uint ParseKeyToVk(string keyName)
     {
         keyName = keyName.Trim();
-        if (Enum.TryParse<Key>(keyName, true, out var key))
+
+        // Enum.TryParse also accepts a numeric string as a raw enum ordinal, so the
+        // Settings window's "5" (it renders Key.D5 as "5") resolved to Key.Clear and
+        // registered Ctrl+Alt+Clear. Digits are resolved by the fallback below instead.
+        if (!IsAsciiDigits(keyName) && Enum.TryParse<Key>(keyName, true, out var key))
         {
             var rawVk = KeyInterop.VirtualKeyFromKey(key);
             if (rawVk > 0) return (uint)rawVk;
@@ -183,6 +187,16 @@ public sealed class GlobalHotkeyService : IDisposable
             "right" or "rightarrow" => 0x27,
             _ => (uint)(keyName.Length == 1 ? char.ToUpperInvariant(keyName[0]) : 0)
         };
+    }
+
+    private static bool IsAsciiDigits(string value)
+    {
+        if (value.Length == 0) return false;
+        foreach (var c in value)
+        {
+            if (!char.IsAsciiDigit(c)) return false;
+        }
+        return true;
     }
 
     public void Unregister() => UnregisterCore(clearSnapshot: true);
