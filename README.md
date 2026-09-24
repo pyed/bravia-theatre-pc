@@ -78,7 +78,7 @@ dotnet run --project src/BraviaTheatre.UI/BraviaTheatre.UI.csproj
 To create a self-contained single-file build:
 
 ```powershell
-dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o publish
+dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:DebugType=none -o publish
 ```
 
 ## Sony account setup and credential storage

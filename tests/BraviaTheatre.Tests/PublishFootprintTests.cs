@@ -11,10 +11,11 @@ namespace BraviaTheatre.Tests;
 /// </summary>
 public class PublishFootprintTests
 {
-    private static readonly string[] PublishWorkflows =
+    private static readonly string[] PublishInstructions =
     [
         Path.Combine(".github", "workflows", "ci.yml"),
-        Path.Combine(".github", "workflows", "release.yml")
+        Path.Combine(".github", "workflows", "release.yml"),
+        "README.md"
     ];
 
     [Fact]
@@ -36,13 +37,15 @@ public class PublishFootprintTests
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
-    public void NoWorkflowReenablesBundleCompressionOnTheCommandLine(int workflowIndex)
+    [InlineData(2)]
+    public void NoPublishCommandReenablesBundleCompressionOnTheCommandLine(int instructionIndex)
     {
         // A command-line -p: switch silently overrides the project setting, so the
-        // guard above is only meaningful while the workflows leave it alone.
-        var workflow = ReadRepositoryFile(PublishWorkflows[workflowIndex]);
+        // guard above is only meaningful while the workflows and documented publish
+        // command leave it alone.
+        var instructions = ReadRepositoryFile(PublishInstructions[instructionIndex]);
 
-        Assert.DoesNotContain("EnableCompressionInSingleFile", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("EnableCompressionInSingleFile", instructions, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

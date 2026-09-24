@@ -73,7 +73,7 @@ public static class MdnsDiscovery
 
                     await client.SendAsync(query, endpoint, timeoutCts.Token);
                     clients.Add(client);
-                    tasks.Add(ListenOnClientAsync(client, timeoutCts.Token));
+                    tasks.Add(ListenOnClientAsync(client, network, timeoutCts.Token));
                     client = null;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -285,6 +285,7 @@ public static class MdnsDiscovery
 
     private static async Task<DiscoveredDevice?> ListenOnClientAsync(
         UdpClient client,
+        ActiveIPv4Interface network,
         CancellationToken cancellationToken)
     {
         try
@@ -292,7 +293,7 @@ public static class MdnsDiscovery
             while (true)
             {
                 var result = await client.ReceiveAsync(cancellationToken);
-                var advertised = ParseResponse(result.Buffer, result.RemoteEndPoint.Address);
+                var advertised = ParseAdvertisedDevice(result.Buffer, result.RemoteEndPoint.Address, network);
                 var verified = await VerifyAdvertisedDeviceAsync(
                     advertised,
                     ProbeControlDeviceAsync,
@@ -308,6 +309,58 @@ public static class MdnsDiscovery
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Parses an mDNS answer and keeps it only when it points at this network.
+    /// </summary>
+    internal static DiscoveredDevice? ParseAdvertisedDevice(
+        byte[] buffer,
+        IPAddress senderAddress,
+        ActiveIPv4Interface network)
+    {
+        var advertised = ParseResponse(buffer, senderAddress);
+        return advertised != null && IsAcceptableAdvertisedAddress(advertised, senderAddress, network)
+            ? advertised
+            : null;
+    }
+
+    /// <summary>
+    /// Any host on the LAN can answer an mDNS query, and the answer's address record can
+    /// name any IPv4 address. Authenticated handshake traffic follows that address, so it
+    /// must stay on the local network: the address has to be local-scope and be either the
+    /// responder itself or on the subnet of the interface that received the answer.
+    /// </summary>
+    internal static bool IsAcceptableAdvertisedAddress(
+        DiscoveredDevice device,
+        IPAddress senderAddress,
+        ActiveIPv4Interface network)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        ArgumentNullException.ThrowIfNull(senderAddress);
+        ArgumentNullException.ThrowIfNull(network);
+
+        if (!IPAddress.TryParse(device.Host, out var address)
+            || address.AddressFamily != AddressFamily.InterNetwork
+            || !IsLocalScopeAddress(address))
+        {
+            return false;
+        }
+
+        if (senderAddress.IsIPv4MappedToIPv6)
+            senderAddress = senderAddress.MapToIPv4();
+        if (address.Equals(senderAddress))
+            return true;
+
+        if (network.Address.Equals(IPAddress.Any)
+            || network.Address.AddressFamily != AddressFamily.InterNetwork
+            || network.Mask.AddressFamily != AddressFamily.InterNetwork)
+        {
+            return false;
+        }
+
+        var mask = ToUInt32(network.Mask);
+        return mask != 0 && (ToUInt32(address) & mask) == (ToUInt32(network.Address) & mask);
     }
 
     internal static async Task<DiscoveredDevice?> VerifyAdvertisedDeviceAsync(
@@ -675,6 +728,13 @@ public static class MdnsDiscovery
             || bytes[0] == 192 && bytes[1] == 168
             || bytes[0] == 172 && bytes[1] is >= 16 and <= 31
             || bytes[0] == 100 && bytes[1] is >= 64 and <= 127;
+    }
+
+    private static bool IsLocalScopeAddress(IPAddress address)
+    {
+        var bytes = address.GetAddressBytes();
+        return IsPrivateOrSharedAddress(address)
+            || bytes[0] == 169 && bytes[1] == 254;
     }
 
     private static string NormalizeDnsName(string name)

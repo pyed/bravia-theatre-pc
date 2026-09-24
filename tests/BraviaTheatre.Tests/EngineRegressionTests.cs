@@ -142,6 +142,36 @@ public class EngineRegressionTests
     }
 
     [Fact]
+    public async Task StaticHostConnectionUsesTheNeutralProductName()
+    {
+        var client = new FakeBraviaClient();
+        var connected = NewSignal();
+        var engine = new BraviaEngine(
+            new SonyCredentials(),
+            "192.168.1.50",
+            55051,
+            (_, _, _) => client,
+            static (_, ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct));
+        engine.StateChanged += state =>
+        {
+            if (state.Connected) connected.TrySetResult(true);
+        };
+
+        try
+        {
+            engine.Start();
+            await connected.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+
+            // No discovery ran, so nothing identifies the model; do not claim a specific one.
+            Assert.Equal("BRAVIA Theatre", engine.CurrentState.DeviceName);
+        }
+        finally
+        {
+            await StopEngineAsync(engine);
+        }
+    }
+
+    [Fact]
     public async Task ConnectionTeardownPublishesDisconnectedBeforeClientDisposal()
     {
         var client = new FakeBraviaClient();
