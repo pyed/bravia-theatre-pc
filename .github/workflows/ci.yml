@@ -68,7 +68,26 @@ jobs:
         run: dotnet test BraviaTheatrePC.sln -c Release --no-build --collect:"XPlat Code Coverage"
 
       - name: Audit NuGet packages
-        run: dotnet package list --project BraviaTheatrePC.sln --vulnerable --include-transitive
+        shell: pwsh
+        run: |
+          # The command exits 0 even when it reports vulnerable packages, so the
+          # result has to be read from its JSON report for the step to fail.
+          $report = dotnet package list --project BraviaTheatrePC.sln --vulnerable --include-transitive --format json
+          if ($LASTEXITCODE -ne 0) { throw "NuGet vulnerability audit could not run (exit code $LASTEXITCODE)." }
+
+          $report = $report -join "`n"
+          Write-Output $report
+
+          $vulnerable = @(
+            ($report | ConvertFrom-Json).projects |
+              ForEach-Object { $_.frameworks } |
+              ForEach-Object { @($_.topLevelPackages) + @($_.transitivePackages) } |
+              Where-Object { $_ -and $_.vulnerabilities }
+          )
+          if ($vulnerable.Count -gt 0) {
+            $names = ($vulnerable | ForEach-Object { "$($_.id) $($_.resolvedVersion)" } | Sort-Object -Unique) -join ", "
+            throw "Vulnerable NuGet packages found: $names"
+          }
 
       - name: Smoke-test standalone publish
         run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:DebugType=none -o artifacts/standalone

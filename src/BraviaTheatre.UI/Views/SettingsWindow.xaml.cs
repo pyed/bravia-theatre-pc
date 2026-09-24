@@ -5,6 +5,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using BraviaTheatre.Core.Engine;
 using BraviaTheatre.UI.Models;
 using BraviaTheatre.UI.Services;
 
@@ -141,6 +142,16 @@ public partial class SettingsWindow : Window
             return;
         }
 
+        var staticHost = TxtStaticHost.Text.Trim();
+        if (staticHost.Length > 0 && !ControlEndpoint.TryNormalizeHost(staticHost, out staticHost))
+        {
+            MessageBox.Show(this,
+                "Enter only the soundbar's IP address or host name, for example 192.168.1.50, without http:// or a port. Leave it empty to find the soundbar automatically.",
+                "Invalid Settings", MessageBoxButton.OK, MessageBoxImage.Warning);
+            TxtStaticHost.Focus();
+            return;
+        }
+
         var updated = _settings.Copy();
         updated.StartWithWindows = ChkStartWithWindows.IsChecked ?? false;
         updated.ShowRearSpeaker = ChkShowRearSpeaker.IsChecked ?? false;
@@ -151,7 +162,7 @@ public partial class SettingsWindow : Window
         updated.HotkeySoundField = TxtHotkeySoundField.Text.Trim();
         updated.HotkeyVoiceMode = TxtHotkeyVoiceMode.Text.Trim();
         updated.HotkeyNightMode = TxtHotkeyNightMode.Text.Trim();
-        updated.StaticHost = TxtStaticHost.Text.Trim();
+        updated.StaticHost = staticHost;
         updated.StaticPort = port;
 
         if (CboLogLevel.SelectedItem is ComboBoxItem selectedItem && selectedItem.Tag != null)

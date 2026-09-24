@@ -15,6 +15,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
 {
     private readonly record struct QueuedCommand(long Generation, string Path, object Value);
     private static readonly TimeSpan CredentialRenewalWindow = TimeSpan.FromMinutes(5);
+    internal const string DefaultDeviceName = "BRAVIA Theatre";
 
     private static readonly string[] MonitoredPaths =
     {
@@ -252,7 +253,9 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         {
             string host = _configuredHost ?? string.Empty;
             int port = _configuredPort;
-            string deviceName = "BRAVIA Theatre Bar 9";
+            // A static host skips discovery, so there is no advertised name to show; use
+            // the neutral product name rather than assuming a particular model.
+            string deviceName = DefaultDeviceName;
 
             if (string.IsNullOrEmpty(host))
             {

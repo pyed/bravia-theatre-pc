@@ -476,7 +476,14 @@ public partial class App : Application
             Log($"Engine cleanup warning: {ex.Message}");
         }
 
-        var host = string.IsNullOrWhiteSpace(_settings.StaticHost) ? null : _settings.StaticHost.Trim();
+        string? host = null;
+        if (!string.IsNullOrWhiteSpace(_settings.StaticHost))
+        {
+            if (ControlEndpoint.TryNormalizeHost(_settings.StaticHost, out var staticHost))
+                host = staticHost;
+            else
+                Log("Configured static host is not a valid host name or IP address; using automatic discovery instead.", AppLogLevel.Critical);
+        }
         var port = _settings.StaticPort is >= 1 and <= 65535 ? _settings.StaticPort : 55051;
         var newEngine = new BraviaEngine(credentialLifecycle, host, port) { LogAction = Log };
         _engine = newEngine;

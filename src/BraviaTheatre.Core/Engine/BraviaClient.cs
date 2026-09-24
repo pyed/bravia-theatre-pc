@@ -71,7 +71,7 @@ public sealed class BraviaClient : IBraviaClient
             MaxSendMessageSize = 16 * 1024 * 1024
         };
 
-        _channel = GrpcChannel.ForAddress($"http://{host}:{port}", options);
+        _channel = GrpcChannel.ForAddress(ControlEndpoint.CreateAddress(host, port), options);
         _protoClient = new ControlDeviceService.ControlDeviceServiceClient(_channel);
     }
 

@@ -197,6 +197,49 @@ public sealed class MdnsDiscoveryTests
                 cancellation.Token));
     }
 
+    [Fact]
+    public void AdvertisedAddressOutsideTheLocalNetworkIsRejected()
+    {
+        var network = new ActiveIPv4Interface(
+            IPAddress.Parse("192.168.50.2"),
+            IPAddress.Parse("255.255.255.0"),
+            ScanEligible: true);
+
+        byte[] Answer(string address) => BuildMdnsResponse(
+            serviceType: "_sonysmarthome._tcp.local.",
+            instanceLabel: "Synthetic Theatre",
+            target: "synthetic-theatre.local.",
+            address: IPAddress.Parse(address),
+            port: 55051,
+            displayName: "Living Room");
+
+        var sender = IPAddress.Parse("192.168.50.42");
+
+        Assert.Equal("192.168.50.42", MdnsDiscovery.ParseAdvertisedDevice(Answer("192.168.50.42"), sender, network)?.Host);
+        Assert.Equal("192.168.50.77", MdnsDiscovery.ParseAdvertisedDevice(Answer("192.168.50.77"), sender, network)?.Host);
+
+        // A spoofed answer must not send the authenticated handshake off this network.
+        Assert.Null(MdnsDiscovery.ParseAdvertisedDevice(Answer("203.0.113.7"), sender, network));
+        Assert.Null(MdnsDiscovery.ParseAdvertisedDevice(Answer("10.9.8.7"), sender, network));
+        Assert.Null(MdnsDiscovery.ParseAdvertisedDevice(Answer("127.0.0.1"), sender, network));
+        Assert.Null(MdnsDiscovery.ParseAdvertisedDevice(
+            Answer("203.0.113.7"), IPAddress.Parse("203.0.113.7"), network));
+    }
+
+    [Fact]
+    public void WithoutAKnownSubnetOnlyTheRespondingDeviceIsAccepted()
+    {
+        var unknownNetwork = new ActiveIPv4Interface(IPAddress.Any, IPAddress.Any, ScanEligible: false);
+        var device = new DiscoveredDevice("192.168.50.42", 55051, "Living Room");
+
+        Assert.True(MdnsDiscovery.IsAcceptableAdvertisedAddress(device, IPAddress.Parse("192.168.50.42"), unknownNetwork));
+        Assert.False(MdnsDiscovery.IsAcceptableAdvertisedAddress(device, IPAddress.Parse("192.168.50.9"), unknownNetwork));
+        Assert.True(MdnsDiscovery.IsAcceptableAdvertisedAddress(
+            new DiscoveredDevice("169.254.10.20", 55051, "Living Room"),
+            IPAddress.Parse("169.254.10.20"),
+            unknownNetwork));
+    }
+
     [Theory]
     [InlineData(Grpc.Core.StatusCode.InvalidArgument)]
     [InlineData(Grpc.Core.StatusCode.Unauthenticated)]
