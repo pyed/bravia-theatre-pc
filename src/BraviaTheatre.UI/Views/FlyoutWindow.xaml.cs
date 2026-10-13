@@ -126,6 +126,9 @@ public partial class FlyoutWindow : Window
 
         SliderVolume.PreviewMouseDown += (_, _) => _isDraggingSlider = true;
         SliderVolume.PreviewMouseUp += (_, _) => _isDraggingSlider = false;
+        // A drag can end without a mouse-up reaching the slider, for example when the flyout
+        // hides mid-drag. Left set, the slider would stop following the soundbar's volume.
+        SliderVolume.LostMouseCapture += (_, _) => _isDraggingSlider = false;
     }
 
     public void ApplySettings(AppSettings settings)

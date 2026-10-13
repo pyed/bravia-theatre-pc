@@ -1,5 +1,6 @@
 using System.Runtime.ExceptionServices;
 using System.Windows.Controls;
+using System.Windows.Input;
 using BraviaTheatre.Core.Auth;
 using BraviaTheatre.Core.Engine;
 using BraviaTheatre.Core.Models;
@@ -86,6 +87,21 @@ public class ReleasePolishTests
                 flyout.UpdateState(new SoundbarState { Connected = true, Power = true });
                 Assert.Equal(System.Windows.Visibility.Visible, codecCard.Visibility);
                 Assert.Single(cards, card => card.Visibility == System.Windows.Visibility.Visible);
+
+                // A drag the flyout loses mid-way never delivers its mouse-up, and the slider
+                // must still follow the soundbar's volume afterwards.
+                var volumeSlider = Assert.IsType<Slider>(flyout.FindName("SliderVolume"));
+                flyout.UpdateState(new SoundbarState { Connected = true, Power = true, Volume = 10 });
+                volumeSlider.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
+                {
+                    RoutedEvent = System.Windows.UIElement.PreviewMouseDownEvent
+                });
+                volumeSlider.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0)
+                {
+                    RoutedEvent = System.Windows.UIElement.LostMouseCaptureEvent
+                });
+                flyout.UpdateState(new SoundbarState { Connected = true, Power = true, Volume = 42 });
+                Assert.Equal(42, volumeSlider.Value);
 
                 flyout.CloseForShutdown();
                 app.Shutdown();

@@ -56,24 +56,25 @@ public sealed class BraviaClient : IBraviaClient
         _creds = credentials;
         _sessionId = credentials.SessionId;
 
-        var httpHandler = new SocketsHttpHandler
+        _channel = GrpcChannel.ForAddress(ControlEndpoint.CreateAddress(host, port), CreateChannelOptions());
+        _protoClient = new ControlDeviceService.ControlDeviceServiceClient(_channel);
+    }
+
+    internal static GrpcChannelOptions CreateChannelOptions() => new()
+    {
+        HttpHandler = new SocketsHttpHandler
         {
             EnableMultipleHttp2Connections = true,
             PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
             KeepAlivePingDelay = TimeSpan.FromSeconds(15),
             KeepAlivePingTimeout = TimeSpan.FromSeconds(5)
-        };
-
-        var options = new GrpcChannelOptions
-        {
-            HttpHandler = httpHandler,
-            MaxReceiveMessageSize = 16 * 1024 * 1024,
-            MaxSendMessageSize = 16 * 1024 * 1024
-        };
-
-        _channel = GrpcChannel.ForAddress(ControlEndpoint.CreateAddress(host, port), options);
-        _protoClient = new ControlDeviceService.ControlDeviceServiceClient(_channel);
-    }
+        },
+        // A channel leaves a handler it was given undisposed unless told otherwise, and every
+        // reconnect builds a new client, so each one orphaned a pinging connection pool.
+        DisposeHttpClient = true,
+        MaxReceiveMessageSize = 16 * 1024 * 1024,
+        MaxSendMessageSize = 16 * 1024 * 1024
+    };
 
     public async Task InitializeSessionAsync(CancellationToken ct = default)
     {

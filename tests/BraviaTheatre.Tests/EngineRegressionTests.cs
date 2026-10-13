@@ -596,6 +596,8 @@ public class EngineRegressionTests
             Assert.True(first.Disposed.Task.IsCompleted);
             Assert.True(secondCreatedAfterFirstDisposed);
             Assert.Equal(2, Volatile.Read(ref clientCount));
+            // One renewal on the open connection was tried before giving up on it.
+            Assert.Equal(2, first.SessionInitializations);
         }
         finally
         {
@@ -856,9 +858,19 @@ public class EngineRegressionTests
         /// <summary>When set, InitializeSessionAsync throws this instead of succeeding.</summary>
         public Exception? InitFailure { get; set; }
 
+        /// <summary>Handshakes attempted, including session renewals on the same client.</summary>
+        public int SessionInitializations => Volatile.Read(ref _sessionInitializations);
+        private int _sessionInitializations;
+
+        /// <summary>Notification streams opened; more than one means a renewal reopened it.</summary>
+        public int NotificationStreams => Volatile.Read(ref _notificationStreams);
+        private int _notificationStreams;
+        public TaskCompletionSource<bool> NotificationsReopened { get; } = NewSignal();
+
         public Task InitializeSessionAsync(CancellationToken ct = default)
         {
             ct.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref _sessionInitializations);
 
             if (InitFailure is not null)
                 throw InitFailure;
@@ -904,6 +916,8 @@ public class EngineRegressionTests
         public async IAsyncEnumerable<byte[]> ReadNotificationsAsync(
             [EnumeratorCancellation] CancellationToken ct = default)
         {
+            if (Interlocked.Increment(ref _notificationStreams) > 1)
+                NotificationsReopened.TrySetResult(true);
             NotificationsStarted.TrySetResult(true);
             try
             {

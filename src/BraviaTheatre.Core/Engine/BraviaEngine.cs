@@ -17,6 +17,11 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
     private static readonly TimeSpan CredentialRenewalWindow = TimeSpan.FromMinutes(5);
     internal const string DefaultDeviceName = "BRAVIA Theatre";
 
+    // The soundbar ends a local session about an hour after the handshake and then rejects every
+    // state query, which used to drop the connection on the hour. Renewing well before that, on
+    // the open connection, keeps it.
+    internal static readonly TimeSpan DeviceSessionRenewalInterval = TimeSpan.FromMinutes(50);
+
     private static readonly string[] MonitoredPaths =
     {
         "power",
@@ -39,6 +44,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Func<string, int, SonyCredentials, IBraviaClient> _clientFactory;
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
+    private readonly TimeProvider _timeProvider;
 
     private readonly object _lifecycleLock = new();
     private Task? _workerTask;
@@ -106,13 +112,15 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         string? host,
         int port,
         Func<string, int, SonyCredentials, IBraviaClient> clientFactory,
-        Func<TimeSpan, CancellationToken, Task> delayAsync)
+        Func<TimeSpan, CancellationToken, Task> delayAsync,
+        TimeProvider? timeProvider = null)
     {
         _credentials = credentials;
         _configuredHost = host;
         _configuredPort = port;
         _clientFactory = clientFactory;
         _delayAsync = delayAsync;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     internal BraviaEngine(
@@ -120,7 +128,8 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         string? host,
         int port,
         Func<string, int, SonyCredentials, IBraviaClient> clientFactory,
-        Func<TimeSpan, CancellationToken, Task> delayAsync)
+        Func<TimeSpan, CancellationToken, Task> delayAsync,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(credentialLifecycle);
         _credentialLifecycle = credentialLifecycle;
@@ -129,6 +138,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         _configuredPort = port;
         _clientFactory = clientFactory;
         _delayAsync = delayAsync;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     private void Log(string msg)
@@ -465,7 +475,8 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
 
                     ActivateConnection(connectionGeneration, deviceName);
 
-                    var notifyTask = NotifyLoopAsync(client, connectionGeneration, connectionCts.Token);
+                    var notifyStream = new NotifyStreamGate();
+                    var notifyTask = NotifyLoopAsync(client, connectionGeneration, notifyStream, connectionCts.Token);
                     connectionTasks.Add(notifyTask);
                     Log("Live notify stream started.");
 
@@ -486,6 +497,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                         deviceName,
                         connectionGeneration,
                         suppressKeepaliveRenewal,
+                        notifyStream,
                         connectionCts.Token);
                     connectionTasks.Add(keepAliveTask);
 
@@ -563,18 +575,44 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         get { lock (_stateLock) return _activeConnectionGeneration; }
     }
 
-    private async Task NotifyLoopAsync(IBraviaClient client, long connectionGeneration, CancellationToken ct)
+    private async Task NotifyLoopAsync(
+        IBraviaClient client,
+        long connectionGeneration,
+        NotifyStreamGate notifyStream,
+        CancellationToken ct)
     {
         try
         {
-            await foreach (var msgBytes in client.ReadNotificationsAsync(ct))
+            var reopened = false;
+            while (true)
             {
-                ct.ThrowIfCancellationRequested();
-                var (path, value) = NotifyParser.ParseNotifyMessage(msgBytes);
+                var stream = await notifyStream.OpenStreamAsync(ct);
+                if (reopened) Log("Live notify stream started on the renewed session.");
 
-                if (!string.IsNullOrEmpty(path))
+                try
                 {
-                    ApplyDeltaForConnection(connectionGeneration, path, value);
+                    await foreach (var msgBytes in client.ReadNotificationsAsync(stream.Token))
+                    {
+                        stream.Token.ThrowIfCancellationRequested();
+                        var (path, value) = NotifyParser.ParseNotifyMessage(msgBytes);
+
+                        if (!string.IsNullOrEmpty(path))
+                        {
+                            ApplyDeltaForConnection(connectionGeneration, path, value);
+                        }
+                    }
+
+                    return;
+                }
+                catch (Exception) when (stream.IsCancellationRequested && !ct.IsCancellationRequested)
+                {
+                    // A device-session renewal closed this stream; the next one binds to the
+                    // renewed session.
+                    reopened = true;
+                }
+                finally
+                {
+                    notifyStream.CloseStream(stream);
                 }
             }
         }
@@ -851,8 +889,10 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         string deviceName,
         long connectionGeneration,
         bool suppressCredentialRenewal,
+        NotifyStreamGate notifyStream,
         CancellationToken ct)
     {
+        var sessionStarted = _timeProvider.GetTimestamp();
         while (!ct.IsCancellationRequested)
         {
             try
@@ -870,11 +910,33 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     return;
                 }
 
+                if (_timeProvider.GetElapsedTime(sessionStarted) >= DeviceSessionRenewalInterval)
+                {
+                    Log("Device session is due for renewal.");
+                    await RenewDeviceSessionAsync(client, notifyStream, ct);
+                    sessionStarted = _timeProvider.GetTimestamp();
+                }
+
                 var baselineRevision = CaptureSnapshotRevision(connectionGeneration);
                 if (baselineRevision == null) return;
 
                 var snapshot = await client.GetInitialStatesAsync(MonitoredPaths, ct);
                 ct.ThrowIfCancellationRequested();
+
+                if (snapshot.Count == 0)
+                {
+                    // Every path was rejected, which means the device ended the session. Renew it
+                    // once on the open connection; if that does not restore it, reconnect.
+                    Log("Device rejected every state query; renewing the device session.");
+                    await RenewDeviceSessionAsync(client, notifyStream, ct);
+                    sessionStarted = _timeProvider.GetTimestamp();
+
+                    baselineRevision = CaptureSnapshotRevision(connectionGeneration);
+                    if (baselineRevision == null) return;
+
+                    snapshot = await client.GetInitialStatesAsync(MonitoredPaths, ct);
+                    ct.ThrowIfCancellationRequested();
+                }
 
                 if (snapshot.Count == 0)
                     throw new InvalidOperationException("Keepalive returned no monitored state.");
@@ -891,6 +953,26 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 throw;
             }
         }
+    }
+
+    private async Task RenewDeviceSessionAsync(
+        IBraviaClient client,
+        NotifyStreamGate notifyStream,
+        CancellationToken ct)
+    {
+        // The notification stream is bound to the old session, so close it before the handshake
+        // and let its replacement open once the new session exists.
+        notifyStream.BeginRenewal();
+        try
+        {
+            await client.InitializeSessionAsync(ct);
+        }
+        finally
+        {
+            notifyStream.EndRenewal();
+        }
+
+        Log("Device session renewed; handshake completed on the open connection.");
     }
 
     internal void ApplySnapshot(Dictionary<string, object?> snapshot, string deviceName) =>

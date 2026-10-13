@@ -1,5 +1,6 @@
 using BraviaTheatre.Core.Engine;
 using Grpc.Core;
+using Grpc.Net.Client;
 using Xunit;
 
 namespace BraviaTheatre.Tests;
@@ -44,5 +45,20 @@ public class ClientProtocolTests
         Assert.Equal(
             "current-session",
             BraviaClient.ResolveSessionId("current-session", responseSessionId));
+    }
+
+    [Fact]
+    public async Task DisposingTheChannelDisposesItsConnectionPool()
+    {
+        // Each reconnect creates a client; a pool left alive keeps its HTTP/2 keepalive pings going.
+        var options = BraviaClient.CreateChannelOptions();
+        var handler = Assert.IsType<SocketsHttpHandler>(options.HttpHandler);
+
+        GrpcChannel.ForAddress("http://127.0.0.1:55051", options).Dispose();
+
+        using var invoker = new HttpMessageInvoker(handler, disposeHandler: false);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "http://127.0.0.1:55051/");
+        await Assert.ThrowsAsync<ObjectDisposedException>(
+            () => invoker.SendAsync(request, TestContext.Current.CancellationToken));
     }
 }

@@ -15,6 +15,7 @@ namespace BraviaTheatre.UI;
 public partial class App : Application
 {
     private const string MutexName = "BraviaTheatrePC_SingleInstance_Mutex_2026";
+    private const int MaxLoggedStackFrames = 16;
     private Mutex? _singleInstanceMutex;
     private bool _ownsSingleInstanceMutex;
 
@@ -34,6 +35,7 @@ public partial class App : Application
     private bool _soundbarPickerDismissed;
     private bool _isShuttingDown;
     private bool _startupCompleted;
+    private readonly ErrorDialogGate _errorDialogs = new();
 
     private readonly object _pendingStateLock = new();
     private PendingEngineState? _pendingState;
@@ -138,8 +140,10 @@ public partial class App : Application
 
         AppDomain.CurrentDomain.UnhandledException += (s, args) =>
         {
-            var failureType = args.ExceptionObject?.GetType().Name ?? "UnknownFailure";
-            Log($"FATAL UNHANDLED EXCEPTION ({failureType}).");
+            var failure = args.ExceptionObject is Exception exception
+                ? FormatExceptionForLog(exception)
+                : args.ExceptionObject?.GetType().Name ?? "UnknownFailure";
+            Log($"FATAL UNHANDLED EXCEPTION: {failure}");
             MessageBox.Show("A fatal application error occurred. Restart BRAVIA Theatre PC and try again.",
                 "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         };
@@ -152,8 +156,18 @@ public partial class App : Application
                 return;
             }
             Log($"DISPATCHER UNHANDLED EXCEPTION: {FormatExceptionForLog(args.Exception)}");
-            MessageBox.Show("An application error occurred. Please try the action again.",
-                "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (_errorDialogs.TryOpen(args.Exception))
+            {
+                try
+                {
+                    MessageBox.Show("An application error occurred. Please try the action again.",
+                        "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    _errorDialogs.Close();
+                }
+            }
             args.Handled = true;
             if (!_startupCompleted)
                 Dispatcher.BeginInvoke(ShutdownApp);
@@ -174,6 +188,8 @@ public partial class App : Application
             return;
         }
 
+        // Before any window exists: WPF reads the stylus switch when it creates the first one.
+        PinNativeLibraries();
         WebViewProfileService.DeleteStaleProfiles(GetAppDataDir());
         try
         {
@@ -246,18 +262,42 @@ public partial class App : Application
             Dispatcher.BeginInvoke(new Action(ShowTrayIconGuidanceOnce));
     }
 
-    private static string FormatExceptionForLog(Exception exception)
+    private static void PinNativeLibraries()
+    {
+        var missing = BundledNativeLibraries.Pin();
+        if (missing.Count == 0) return;
+
+        Log($"Native libraries could not be loaded: {string.Join(", ", missing)}.", AppLogLevel.Critical);
+        if (missing.Contains(BundledNativeLibraries.PenImc))
+        {
+            // WPF's pen and touch stack cannot start without it, and would throw on every
+            // device change once a digitizer appears. Touch still arrives as mouse input.
+            AppContext.SetSwitch(BundledNativeLibraries.DisableStylusAndTouchSupportSwitch, true);
+        }
+    }
+
+    internal static string FormatExceptionForLog(Exception exception)
     {
         var details = new List<string>();
+        var innermost = exception;
         for (Exception? current = exception; current != null && details.Count < 8; current = current.InnerException)
         {
             var message = current.Message.Replace('\r', ' ').Replace('\n', ' ').Trim();
             details.Add(string.IsNullOrEmpty(message)
                 ? current.GetType().Name
                 : $"{current.GetType().Name}: {message}");
+            innermost = current;
         }
 
-        return string.Join(" -> ", details);
+        // Runtime messages can be generic ("Dll was not found." names no library), so the
+        // frames are what show where a failure came from.
+        var frames = (innermost.StackTrace ?? string.Empty)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Take(MaxLoggedStackFrames);
+        var stack = string.Join(" | ", frames);
+
+        var summary = string.Join(" -> ", details);
+        return stack.Length == 0 ? summary : $"{summary} | {stack}";
     }
 
     private bool InitializeTray()
