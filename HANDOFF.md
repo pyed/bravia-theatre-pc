@@ -21,7 +21,7 @@ Last updated: 2026-10-14
 | Overnight work, 2026-10-14 | Released in v2.3.0; open checks in section 7 |
 | v2.3.0 release | Published 2026-10-14 11:31 (08:31 UTC) with all five assets; Release and CI on `main` green |
 | v2.3.1 release | Tag only, no release: its Release run failed at the self-contained publish (`NETSDK1094`, section 8) |
-| v2.3.2 release | Tagged 2026-10-14; result recorded once the Release run finishes |
+| v2.3.2 release | Published 2026-10-14 16:46 (13:46 UTC) with all five assets; both executables passed the release run's startup check; CI on `main` green |
 
 Released as **v2.3.2** on 2026-10-14: the framework-dependent download starts again (it never had
 since ReadyToRun was enabled), CI restores and publishes exactly as the release does, and both
