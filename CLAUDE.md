@@ -116,10 +116,14 @@ A `v*` tag runs `release.yml`, which derives the version from the tag. Bump `<Ve
   Every build gets a new folder there; `BundleExtractionCleanup` deletes the other builds' folders at
   startup. The release ships one executable on purpose (see HANDOFF section 7, P4-5): the publish
   folder must contain nothing else, which CI checks.
-- **Framework-dependent single file.** `PublishReadyToRun` is enabled for self-contained publishes
-  only. A framework-dependent single-file bundle with a ReadyToRun main assembly fails fast inside
-  the runtime (`0xC0000602`) before `Main` (seen on 10.0.10 and 10.0.12), so that download never started. CI
-  and the release workflow launch both executables and fail if either exits within 20 seconds.
+- **ReadyToRun and the two variants.** Both publishes compile ReadyToRun into the same
+  `obj\...\win-x64\R2R`, and the self-contained single file is a composite image whose stubs point
+  into `BraviaTheatrePC.r2r.dll`. A framework-dependent publish after it reused those stubs and failed
+  fast before `Main` (`0xC0000602`) for every release up to v2.3.0. Framework-dependent publishes
+  therefore turn ReadyToRun off (`SelfContained` explicitly false); keep `PublishReadyToRun` true
+  otherwise, or a restore that names neither variant skips the compiler and the release's
+  `--no-restore` publish fails with `NETSDK1094` (v2.3.1). CI restores and publishes exactly like
+  the release, and both workflows launch both executables and fail if either exits within 20 s.
 - **Rendering.** The app renders in software (`RenderMode.SoftwareOnly`): hardware rendering loaded
   the GPU driver's user-mode stack for good (100+ MB private with NVIDIA) and drew nothing while the
   display was off. DWM still draws the acrylic and Mica backdrops; check them with screenshots over

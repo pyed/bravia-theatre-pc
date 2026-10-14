@@ -24,13 +24,21 @@
          package's own copy landed beside the executable as a stray duplicate. -->
     <WebView2NeverCopyLoaderDllToOutputDirectory>true</WebView2NeverCopyLoaderDllToOutputDirectory>
     <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
-    <!-- Self-contained only. A framework-dependent single-file bundle whose main assembly is
-         ReadyToRun fails fast inside the runtime before Main (0xC0000602, on 10.0.10 and
-         10.0.12 alike), so that variant never started. It JITs the app's code instead. -->
-    <PublishReadyToRun Condition="'$(SelfContained)' == 'true'">true</PublishReadyToRun>
+    <PublishReadyToRun>true</PublishReadyToRun>
     <!-- LibraryImport generates its marshalling code, which needs unsafe blocks. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Description>Native Windows 11 Fluent audio controller for Sony BRAVIA Theatre systems</Description>
+  </PropertyGroup>
+
+  <!-- Framework-dependent publishes skip ReadyToRun. The SDK compiles a self-contained single file
+       into one composite image and keeps the result in obj\...\R2R, which a framework-dependent
+       publish for the same runtime shares. Its incremental compile then reused those stubs, whose
+       code lives in the composite image only the self-contained bundle carries, and the runtime
+       failed fast before Main (0xC0000602): that download never started. The condition is an
+       explicit false so that a restore naming neither variant, like the release's, still fetches
+       the compiler for the self-contained publish (otherwise NETSDK1094). -->
+  <PropertyGroup Condition="'$(SelfContained)' == 'false'">
+    <PublishReadyToRun>false</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>

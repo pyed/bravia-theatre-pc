@@ -89,11 +89,16 @@ jobs:
             throw "Vulnerable NuGet packages found: $names"
           }
 
+      # Restore and publish exactly as release.yml does. A publish that restores on its own hid a
+      # release that could not publish with --no-restore (NETSDK1094).
+      - name: Restore for publishing
+        run: dotnet restore BraviaTheatrePC.sln -r win-x64
+
       - name: Smoke-test standalone publish
-        run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:DebugType=none -o artifacts/standalone
+        run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --self-contained --no-restore -p:PublishSingleFile=true -p:DebugType=none -o artifacts/standalone
 
       - name: Smoke-test framework-dependent publish
-        run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --no-self-contained -p:PublishSingleFile=true -p:DebugType=none -o artifacts/framework-dependent
+        run: dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --no-self-contained --no-restore -p:PublishSingleFile=true -p:DebugType=none -o artifacts/framework-dependent
 
       - name: Verify publish outputs
         shell: pwsh

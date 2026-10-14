@@ -27,14 +27,45 @@ public class PublishFootprintTests
     }
 
     [Fact]
-    public void SelfContainedBuildIsPrecompiledSoStartupDoesNotJitTheWholeUi()
+    public void ApplicationIsPrecompiledSoStartupDoesNotJitTheWholeUi()
     {
-        // Only the self-contained build: the framework-dependent single file with a ReadyToRun main
-        // assembly failed fast inside the runtime before Main, so that download never started.
         var project = ReadRepositoryFile(Path.Combine("src", "BraviaTheatre.UI", "BraviaTheatre.UI.csproj"));
 
-        Assert.Contains("<PublishReadyToRun Condition=\"'$(SelfContained)' == 'true'\">true</PublishReadyToRun>", project, StringComparison.Ordinal);
-        Assert.DoesNotContain("<PublishReadyToRun>true</PublishReadyToRun>", project, StringComparison.Ordinal);
+        // On unless a publish says it is framework-dependent: restore has to see it to fetch the
+        // compiler. Made conditional on SelfContained being true, the release's restore skipped it
+        // and its --no-restore publish failed with NETSDK1094.
+        Assert.Contains("<PublishReadyToRun>true</PublishReadyToRun>", project, StringComparison.Ordinal);
+        Assert.DoesNotContain("<PublishReadyToRun Condition", project, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FrameworkDependentPublishSkipsReadyToRun()
+    {
+        // Both variants compile ReadyToRun into the same obj folder, and the self-contained one is a
+        // composite image. A framework-dependent publish after it reused its stubs, so that
+        // download failed fast inside the runtime before Main. Keyed on an explicit false so a
+        // restore that names neither variant still fetches the compiler.
+        var project = ReadRepositoryFile(Path.Combine("src", "BraviaTheatre.UI", "BraviaTheatre.UI.csproj"));
+
+        Assert.Matches(
+            @"<PropertyGroup Condition=""'\$\(SelfContained\)' == 'false'"">\s*<PublishReadyToRun>false</PublishReadyToRun>\s*</PropertyGroup>",
+            project);
+    }
+
+    [Fact]
+    public void CiRestoresAndPublishesTheWayTheReleaseDoes()
+    {
+        // CI published with an implicit restore and passed while the release, which restores once
+        // and publishes with --no-restore, could not publish at all.
+        foreach (var workflow in new[] { "ci.yml", "release.yml" })
+        {
+            var text = ReadRepositoryFile(Path.Combine(".github", "workflows", workflow)).ReplaceLineEndings("\n");
+            var publishes = text.Split('\n').Where(line => line.Contains("dotnet publish", StringComparison.Ordinal)).ToArray();
+
+            Assert.Contains("dotnet restore BraviaTheatrePC.sln -r win-x64", text, StringComparison.Ordinal);
+            Assert.Equal(2, publishes.Length);
+            Assert.All(publishes, line => Assert.Contains("--no-restore", line, StringComparison.Ordinal));
+        }
     }
 
     [Fact]

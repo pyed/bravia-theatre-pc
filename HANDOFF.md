@@ -15,16 +15,18 @@ Last updated: 2026-10-14
 | Volume slider stops following the soundbar after an interrupted drag | Fixed in v2.2.8 |
 | Soundbar connection drops every hour | Fixed in v2.2.8; verified on the reporter's soundbar (section 3) |
 | Build on the reporter's PC | Framework-dependent build with the section 8 fix (reports 2.3.0) since 2026-10-14 16:14 |
-| Framework-dependent download never starts | Fixed in v2.3.1 (section 8) |
+| Framework-dependent download never starts | Fixed in v2.3.2 (section 8) |
 | v2.2.8 release | Published 2026-10-13 22:56 UTC with all five assets; CI on `main` green |
 | Full audit with prioritized fix proposal | Done 2026-10-14 (section 4) |
 | Overnight work, 2026-10-14 | Released in v2.3.0; open checks in section 7 |
 | v2.3.0 release | Published 2026-10-14 11:31 (08:31 UTC) with all five assets; Release and CI on `main` green |
-| v2.3.1 release | Tagged 2026-10-14; result recorded below once the Release run finishes |
+| v2.3.1 release | Tag only, no release: its Release run failed at the self-contained publish (`NETSDK1094`, section 8) |
+| v2.3.2 release | Tagged 2026-10-14; result recorded once the Release run finishes |
 
-Released as **v2.3.1** on 2026-10-14: the framework-dependent download starts again (it never had
-since ReadyToRun was enabled), and CI and the release workflow now launch both executables
-(section 8).
+Released as **v2.3.2** on 2026-10-14: the framework-dependent download starts again (it never had
+since ReadyToRun was enabled), CI restores and publishes exactly as the release does, and both
+workflows launch both executables (section 8). v2.3.1 was tagged but never released: its release
+failed to build.
 
 Released as **v2.3.0** on 2026-10-14: one commit on `main` with batches 1 to 3, P4-4 and P4-5 from
 section 4 (details in section 7), tagged `v2.3.0`; the tag push runs the Release workflow. Minor
@@ -539,11 +541,11 @@ loaded, one extraction folder in `%TEMP%\.net`, 40 MB private bytes at start. Ro
 3. P1-2 needs a second monitor with another scale, or a Remote Desktop session, to check placement.
 4. P2-2's notification appears only when sign-in or a soundbar choice is really needed.
 5. P2-9 evidence: a Verbose log over one handshake shows whether ConfirmSignin reports success.
-6. Optionally replace the build in `Documents\bin` with the v2.3.1 framework-dependent release
+6. Optionally replace the build in `Documents\bin` with the v2.3.2 framework-dependent release
    asset, so Settings reports 2.3.1 and the install is the attested build (same code as the
    16:14 deployment in section 8).
 
-## 8. Framework-dependent download never started (fixed in v2.3.1)
+## 8. Framework-dependent download never started (fixed in v2.3.2)
 
 ### Symptom
 
@@ -563,34 +565,42 @@ also rebooted at 11:31, and the app is not set to start with Windows, so nothing
   (`COREHOST_TRACE`) resolves both frameworks, and the test host runs WPF on the same runtime.
 - Not a version gap: SDK 10.0.302 builds against 10.0.10, the app rolls forward to 10.0.12, and
   forcing 10.0.10 (a private `DOTNET_ROOT` of junctions, confirmed by trace) crashes the same way.
-- Bisect, framework-dependent: single file + ReadyToRun crashes; single file without ReadyToRun
-  runs; folder + ReadyToRun runs; the shipped exe runs with `DOTNET_ReadyToRun=0`; single file +
-  ReadyToRun with only the main assembly excluded (`PublishReadyToRunExclude`) runs. The
-  self-contained build loads the same ReadyToRun main assembly without trouble.
-  (`DOTNET_ReadyToRunExcludeList` had no effect; release runtimes seem to ignore it.)
+- The shipped exe starts with `DOTNET_ReadyToRun=0`, so the precompiled code is what kills it.
+- **Root cause, found later:** the v2.3.0 asset contains 11 references to `BraviaTheatrePC.r2r.dll`;
+  every build that starts contains none. For a self-contained single file the SDK compiles
+  ReadyToRun as one composite image (`PublishReadyToRunComposite` defaults on for single file with
+  ReadyToRun, off unless self-contained) and rewrites each assembly into a stub pointing at it. Both
+  variants write that to the same `obj\Release\net10.0-windows\win-x64\R2R` (`_ReadyToRunOutputPath`
+  is set inside an SDK target). The release publishes self-contained first; the framework-dependent
+  publish's ReadyToRun compile is incremental, found up-to-date outputs, and bundled the stubs
+  without the composite image, and the runtime fails fast at the first one.
 
-Conclusion: a framework-dependent single-file bundle whose main assembly is ReadyToRun fails fast
-inside the runtime before `Main`, on 10.0.10 and 10.0.12 alike. Not specific to the reporter's install. The
-framework-dependent asset has probably never started since `PublishReadyToRun` was enabled, and CI
-only checked that the files were published.
+A dead end worth knowing: the first bisect (single file + ReadyToRun crashes, folder + ReadyToRun
+starts, excluding only the main assembly starts) depended on which variant had last written that
+shared folder. It led to the wrong conclusion that a ReadyToRun main assembly cannot run in a
+framework-dependent bundle, which went into v2.3.1. `DOTNET_ReadyToRunExcludeList` had no effect.
 
-### Fix (v2.3.1)
+### Fix
 
-- `PublishReadyToRun` is set only when `SelfContained` is true. The framework-dependent variant JITs
-  the app's code (it starts in a fraction of a second; 21 MB private at start).
-  `PublishFootprintTests` pins the condition; restoring the unconditional property fails it.
-- CI and the release workflow now launch both published executables and fail if either exits within
-  20 seconds. Without credentials the app opens sign-in and waits. Checked locally: both fixed
-  builds pass, and the v2.3.0 framework-dependent exe fails with `0xC0000602`. Not yet run on a
-  GitHub runner.
-- Deployed: the fixed framework-dependent build (SHA-256 `F04E10A9...F95FF400`) over the broken
-  download in `Documents\bin`, started in the reporter's Remote Desktop session at 16:14. It runs on
-  the installed 10.0.12. It had not connected by 16:16 because the soundbar answered ping but refused
-  TCP 55051 (its control service was not listening; it accepted connections in standby that morning).
-  The app keeps retrying.
-
-### Release
-
-Released as v2.3.1 the same afternoon at the reporter's request, because the v2.3.0
-framework-dependent asset is broken. The smoke step's first runs on GitHub are recorded in the
-status table.
+- v2.3.1 made `PublishReadyToRun` conditional on `SelfContained` being true. Its release run failed
+  at the self-contained publish with `NETSDK1094`: the release restores once without naming a
+  variant, so the restore no longer fetched the crossgen pack, and the publish skips restore. CI
+  passed because its publishes restored on their own. The v2.3.1 tag exists; nothing was released.
+  Not reproducible here because this PC's NuGet cache already held the pack.
+- v2.3.2: `PublishReadyToRun` is true by default, and a publish with `SelfContained` explicitly
+  false turns it off, so framework-dependent publishes never touch the shared folder. A restore that
+  names neither variant still lists `Microsoft.NETCore.App.Crossgen2.win-x64` (checked with a forced
+  restore). `PublishFootprintTests` pins both properties.
+- CI now restores with `-r win-x64` and publishes with `--no-restore`, exactly as `release.yml` does
+  (pinned by `CiRestoresAndPublishesTheWayTheReleaseDoes`), and both workflows launch both published
+  executables and fail if either exits within 20 seconds; without credentials the app opens sign-in
+  and waits. The first CI run with that step (on v2.3.1's commit) passed on GitHub.
+- Checked locally with the release's sequence (forced restore, self-contained publish, then
+  framework-dependent publish, same folder): the self-contained bundle is composite, the
+  framework-dependent one has no references to the composite image, and both start. With the app
+  already running they reach its single-instance check and hand over, exit code 0.
+- Deployed at 16:14: a framework-dependent build without ReadyToRun (SHA-256 `F04E10A9...F95FF400`)
+  over the broken download in `Documents\bin`, started in the reporter's Remote Desktop session. It
+  runs on the installed 10.0.12. It had not connected by 16:40: the soundbar answered ping but
+  refused TCP 55051 (its control service was not listening; it accepted connections in standby that
+  morning). The app keeps retrying.
