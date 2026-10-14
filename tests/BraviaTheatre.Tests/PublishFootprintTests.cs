@@ -27,11 +27,14 @@ public class PublishFootprintTests
     }
 
     [Fact]
-    public void ApplicationIsPrecompiledSoStartupDoesNotJitTheWholeUi()
+    public void SelfContainedBuildIsPrecompiledSoStartupDoesNotJitTheWholeUi()
     {
+        // Only the self-contained build: the framework-dependent single file with a ReadyToRun main
+        // assembly failed fast inside the runtime before Main, so that download never started.
         var project = ReadRepositoryFile(Path.Combine("src", "BraviaTheatre.UI", "BraviaTheatre.UI.csproj"));
 
-        Assert.Contains("<PublishReadyToRun>true</PublishReadyToRun>", project, StringComparison.Ordinal);
+        Assert.Contains("<PublishReadyToRun Condition=\"'$(SelfContained)' == 'true'\">true</PublishReadyToRun>", project, StringComparison.Ordinal);
+        Assert.DoesNotContain("<PublishReadyToRun>true</PublishReadyToRun>", project, StringComparison.Ordinal);
     }
 
     [Fact]

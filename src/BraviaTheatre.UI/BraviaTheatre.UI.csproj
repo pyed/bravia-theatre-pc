@@ -24,7 +24,10 @@
          package's own copy landed beside the executable as a stray duplicate. -->
     <WebView2NeverCopyLoaderDllToOutputDirectory>true</WebView2NeverCopyLoaderDllToOutputDirectory>
     <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
-    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- Self-contained only. A framework-dependent single-file bundle whose main assembly is
+         ReadyToRun fails fast inside the runtime before Main (0xC0000602, on 10.0.10 and
+         10.0.12 alike), so that variant never started. It JITs the app's code instead. -->
+    <PublishReadyToRun Condition="'$(SelfContained)' == 'true'">true</PublishReadyToRun>
     <!-- LibraryImport generates its marshalling code, which needs unsafe blocks. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Description>Native Windows 11 Fluent audio controller for Sony BRAVIA Theatre systems</Description>

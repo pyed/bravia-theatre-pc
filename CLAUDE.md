@@ -116,6 +116,10 @@ A `v*` tag runs `release.yml`, which derives the version from the tag. Bump `<Ve
   Every build gets a new folder there; `BundleExtractionCleanup` deletes the other builds' folders at
   startup. The release ships one executable on purpose (see HANDOFF section 7, P4-5): the publish
   folder must contain nothing else, which CI checks.
+- **Framework-dependent single file.** `PublishReadyToRun` is enabled for self-contained publishes
+  only. A framework-dependent single-file bundle with a ReadyToRun main assembly fails fast inside
+  the runtime (`0xC0000602`) before `Main` (seen on 10.0.10 and 10.0.12), so that download never started. CI
+  and the release workflow launch both executables and fail if either exits within 20 seconds.
 - **Rendering.** The app renders in software (`RenderMode.SoftwareOnly`): hardware rendering loaded
   the GPU driver's user-mode stack for good (100+ MB private with NVIDIA) and drew nothing while the
   display was off. DWM still draws the acrylic and Mica backdrops; check them with screenshots over

@@ -14,11 +14,17 @@ Last updated: 2026-10-14
 | gRPC connection pool leaked on every reconnect | Fixed in v2.2.8 |
 | Volume slider stops following the soundbar after an interrupted drag | Fixed in v2.2.8 |
 | Soundbar connection drops every hour | Fixed in v2.2.8; verified on the reporter's soundbar (section 3) |
-| Build on the reporter's PC | Working-tree build of v2.3.0's code (reports 2.2.8) since 2026-10-14 10:52 (section 7) |
+| Build on the reporter's PC | Framework-dependent build with the section 8 fix (reports 2.3.0) since 2026-10-14 16:14 |
+| Framework-dependent download never starts | Fixed in v2.3.1 (section 8) |
 | v2.2.8 release | Published 2026-10-13 22:56 UTC with all five assets; CI on `main` green |
 | Full audit with prioritized fix proposal | Done 2026-10-14 (section 4) |
 | Overnight work, 2026-10-14 | Released in v2.3.0; open checks in section 7 |
 | v2.3.0 release | Published 2026-10-14 11:31 (08:31 UTC) with all five assets; Release and CI on `main` green |
+| v2.3.1 release | Tagged 2026-10-14; result recorded below once the Release run finishes |
+
+Released as **v2.3.1** on 2026-10-14: the framework-dependent download starts again (it never had
+since ReadyToRun was enabled), and CI and the release workflow now launch both executables
+(section 8).
 
 Released as **v2.3.0** on 2026-10-14: one commit on `main` with batches 1 to 3, P4-4 and P4-5 from
 section 4 (details in section 7), tagged `v2.3.0`; the tag push runs the Release workflow. Minor
@@ -533,5 +539,58 @@ loaded, one extraction folder in `%TEMP%\.net`, 40 MB private bytes at start. Ro
 3. P1-2 needs a second monitor with another scale, or a Remote Desktop session, to check placement.
 4. P2-2's notification appears only when sign-in or a soundbar choice is really needed.
 5. P2-9 evidence: a Verbose log over one handshake shows whether ConfirmSignin reports success.
-6. Optionally replace the working-tree build in `Documents\bin` with the v2.3.0 release asset,
-   so Settings reports 2.3.0 and the install is the attested build (same code).
+6. Optionally replace the build in `Documents\bin` with the v2.3.1 framework-dependent release
+   asset, so Settings reports 2.3.1 and the install is the attested build (same code as the
+   16:14 deployment in section 8).
+
+## 8. Framework-dependent download never started (fixed in v2.3.1)
+
+### Symptom
+
+The reporter downloaded v2.3.0's `BraviaTheatrePC-FrameworkDependent.exe`, renamed it to
+`BraviaTheatrePC.exe` in `Documents\bin` (replacing the standalone build), and double-clicking it did
+nothing. They had seen the same with earlier releases and suspected their .NET install. (The PC had
+also rebooted at 11:31, and the app is not set to start with Windows, so nothing was running.)
+
+### Evidence
+
+- Application log: `APPCRASH` at 14:37 and 16:00, faulting module `coreclr.dll` 10.0.12, exception
+  `0xc0000602` (fail-fast). WER archives hold the same crash for the framework-dependent exe on
+  2026-09-21. No `.NET Runtime` event and nothing on stderr; the crash report's loaded modules stop
+  at `coreclr`, `System.Private.CoreLib`, `clrjit` and `icu.dll`, so it died before `Main`.
+- The download is intact (SHA-256 matches the release's `.sha256`), and a local build crashes too.
+- .NET is fine: `Microsoft.WindowsDesktop.App` 10.0.10 and 10.0.12 are installed, a host trace
+  (`COREHOST_TRACE`) resolves both frameworks, and the test host runs WPF on the same runtime.
+- Not a version gap: SDK 10.0.302 builds against 10.0.10, the app rolls forward to 10.0.12, and
+  forcing 10.0.10 (a private `DOTNET_ROOT` of junctions, confirmed by trace) crashes the same way.
+- Bisect, framework-dependent: single file + ReadyToRun crashes; single file without ReadyToRun
+  runs; folder + ReadyToRun runs; the shipped exe runs with `DOTNET_ReadyToRun=0`; single file +
+  ReadyToRun with only the main assembly excluded (`PublishReadyToRunExclude`) runs. The
+  self-contained build loads the same ReadyToRun main assembly without trouble.
+  (`DOTNET_ReadyToRunExcludeList` had no effect; release runtimes seem to ignore it.)
+
+Conclusion: a framework-dependent single-file bundle whose main assembly is ReadyToRun fails fast
+inside the runtime before `Main`, on 10.0.10 and 10.0.12 alike. Not specific to the reporter's install. The
+framework-dependent asset has probably never started since `PublishReadyToRun` was enabled, and CI
+only checked that the files were published.
+
+### Fix (v2.3.1)
+
+- `PublishReadyToRun` is set only when `SelfContained` is true. The framework-dependent variant JITs
+  the app's code (it starts in a fraction of a second; 21 MB private at start).
+  `PublishFootprintTests` pins the condition; restoring the unconditional property fails it.
+- CI and the release workflow now launch both published executables and fail if either exits within
+  20 seconds. Without credentials the app opens sign-in and waits. Checked locally: both fixed
+  builds pass, and the v2.3.0 framework-dependent exe fails with `0xC0000602`. Not yet run on a
+  GitHub runner.
+- Deployed: the fixed framework-dependent build (SHA-256 `F04E10A9...F95FF400`) over the broken
+  download in `Documents\bin`, started in the reporter's Remote Desktop session at 16:14. It runs on
+  the installed 10.0.12. It had not connected by 16:16 because the soundbar answered ping but refused
+  TCP 55051 (its control service was not listening; it accepted connections in standby that morning).
+  The app keeps retrying.
+
+### Release
+
+Released as v2.3.1 the same afternoon at the reporter's request, because the v2.3.0
+framework-dependent asset is broken. The smoke step's first runs on GitHub are recorded in the
+status table.

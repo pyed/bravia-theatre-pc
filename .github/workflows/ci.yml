@@ -106,3 +106,20 @@ jobs:
               throw "The $variant publish must contain only BraviaTheatrePC.exe; found: $($files -join ', ')."
             }
           }
+
+      - name: Smoke-test that both executables start
+        shell: pwsh
+        run: |
+          # A publish that succeeds proves nothing about startup: the framework-dependent build
+          # failed fast inside the runtime before Main for several releases. Without Sony
+          # credentials the app opens sign-in and waits, so still running after 20 seconds
+          # means it started; a crash exits within a second or two.
+          foreach ($variant in "standalone", "framework-dependent") {
+            $process = Start-Process -FilePath "artifacts/$variant/BraviaTheatrePC.exe" -PassThru
+            if ($process.WaitForExit(20000)) {
+              throw ("The $variant executable exited during startup with code 0x{0:X8}." -f $process.ExitCode)
+            }
+            Stop-Process -Id $process.Id -Force
+            $process.WaitForExit()
+            Write-Output "The $variant executable was still running after 20 seconds."
+          }
