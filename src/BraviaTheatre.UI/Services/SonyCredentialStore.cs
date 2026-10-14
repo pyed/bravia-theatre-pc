@@ -95,7 +95,7 @@ public sealed class SonyCredentialStore
             Buffer.BlockCopy(protectedBytes, 0, payload, Magic.Length, protectedBytes.Length);
 
             tempPath = Path.Combine(directory, $".{Path.GetFileName(ProtectedFilePath)}.{Guid.NewGuid():N}.tmp");
-            File.WriteAllBytes(tempPath, payload);
+            DurableFile.WriteNew(tempPath, payload);
             File.Move(tempPath, ProtectedFilePath, true);
             return true;
         }

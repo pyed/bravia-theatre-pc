@@ -1,15 +1,38 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using BraviaTheatre.Core;
 using BraviaTheatre.Core.Auth;
 using BraviaTheatre.Core.Engine;
 using BraviaTheatre.Core.Models;
 using BraviaTheatre.Core.Wire;
+using Grpc.Core;
 
 namespace BraviaTheatre.Tests;
 
 public class EngineRegressionTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+
+    [Fact]
+    public void TransportFailuresNameTheirCauseButNotItsMessage()
+    {
+        // The log said only "StatusCode=Unknown" when the connection dropped at night.
+        var failure = new RpcException(new Status(
+            StatusCode.Unavailable,
+            "Error connecting to subchannel.",
+            new System.Net.Http.HttpRequestException(
+                System.Net.Http.HttpRequestError.ConnectionError,
+                "Connection refused (192.0.2.10:55051)",
+                new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionRefused))));
+
+        var description = BraviaEngine.DescribeFailure(failure);
+
+        Assert.Equal(
+            "RpcException (StatusCode=Unavailable, Cause=HttpRequestException(ConnectionError) <- SocketException(ConnectionRefused))",
+            description);
+        Assert.Equal("RpcException (StatusCode=Cancelled)", BraviaEngine.DescribeFailure(new RpcException(new Status(StatusCode.Cancelled, "Cancelled"))));
+        Assert.Equal(nameof(TimeoutException), BraviaEngine.DescribeFailure(new TimeoutException("192.0.2.10")));
+    }
 
     [Fact]
     public void ShortSoundFieldNotificationUpdatesCanonicalEngineState()
@@ -377,7 +400,7 @@ public class EngineRegressionTests
             (_, _, _) => client,
             static (_, ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct))
         {
-            LogAction = _ => throw new InvalidOperationException("logger failed")
+            LogAction = (_, _) => throw new InvalidOperationException("logger failed")
         };
 
         engine.StateChanged += _ => throw new InvalidOperationException("subscriber failed");
@@ -799,6 +822,92 @@ public class EngineRegressionTests
         Assert.Equal("Standby", standby.HumanCodec);
     }
 
+    [Fact]
+    public async Task StoppingTheEngineDoesNotReportItsOwnCancellationAsAFailure()
+    {
+        // gRPC reports a cancelled stream as RpcException(Cancelled), which was logged at
+        // Critical as "Notify stream ended" on every deliberate reconnect.
+        var client = new FakeBraviaClient { ReportCancellationAsRpcException = true };
+        var logs = new ConcurrentQueue<string>();
+        var engine = new BraviaEngine(
+            new SonyCredentials(),
+            "test-host",
+            55051,
+            (_, _, _) => client,
+            static (_, ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct))
+        {
+            LogAction = (message, _) => logs.Enqueue(message)
+        };
+
+        engine.Start();
+        await client.NotificationsStarted.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+        await StopEngineAsync(engine);
+
+        Assert.True(client.NotificationsStopped.Task.IsCompleted);
+        Assert.DoesNotContain(logs, line => line.Contains("Notify stream ended", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("volume")]
+    [InlineData("sound_setting.volume.rear")]
+    public async Task SliderDragSendsOnlyTheLatestQueuedValue(string path)
+    {
+        // Each command costs two round trips, so a drag that queued a value per step used to
+        // replay every step on the device.
+        var client = new FakeBraviaClient();
+        var firstStarted = NewSignal();
+        var releaseFirst = NewSignal();
+        var secondDone = NewSignal();
+        var connected = NewSignal();
+        var commandCount = 0;
+        client.CommandHandler = async ct =>
+        {
+            var count = Interlocked.Increment(ref commandCount);
+            if (count == 1)
+            {
+                firstStarted.TrySetResult(true);
+                await releaseFirst.Task.WaitAsync(ct);
+            }
+            else if (count == 2)
+            {
+                secondDone.TrySetResult(true);
+            }
+        };
+
+        var engine = new BraviaEngine(
+            new SonyCredentials(),
+            "test-host",
+            55051,
+            (_, _, _) => client,
+            static (_, ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct));
+        engine.StateChanged += state =>
+        {
+            if (state.Connected && state.Power) connected.TrySetResult(true);
+        };
+        Func<int, Task<bool>> setValue = path == "volume" ? engine.SetVolumeAsync : engine.SetRearLevelAsync;
+
+        try
+        {
+            engine.Start();
+            await connected.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+
+            Assert.True(await setValue(1));
+            await firstStarted.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+            for (var value = 2; value <= 6; value++)
+                Assert.True(await setValue(value));
+
+            releaseFirst.TrySetResult(true);
+            await secondDone.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            releaseFirst.TrySetResult(true);
+            await StopEngineAsync(engine);
+        }
+
+        Assert.Equal(new (string, object?)[] { (path, 1), (path, 6) }, client.CommandValues.ToArray());
+    }
+
     private static void ApplyAudioValue(BraviaEngine engine, string path, object? value, bool useSnapshot)
     {
         if (useSnapshot)
@@ -841,13 +950,14 @@ public class EngineRegressionTests
 
     internal sealed class FakeBraviaClient : IBraviaClient
     {
-        public Action<string>? LogAction { get; set; }
+        public Action<string, DiagnosticLevel>? LogAction { get; set; }
         public Action? OnDispose { get; set; }
         public Func<CancellationToken, Task>? CommandHandler { get; set; }
         public Func<IEnumerable<string>, CancellationToken, Task<Dictionary<string, object?>>>? StateHandler { get; set; }
         public bool CommandResult { get; set; } = true;
 
         public ConcurrentQueue<string> Commands { get; } = new();
+        public ConcurrentQueue<(string Path, object? Value)> CommandValues { get; } = new();
         public TaskCompletionSource<bool> Initialized { get; } = NewSignal();
         public TaskCompletionSource<bool> CommandReceived { get; } = NewSignal();
         public TaskCompletionSource<bool> EndNotifications { get; } = NewSignal();
@@ -857,6 +967,9 @@ public class EngineRegressionTests
 
         /// <summary>When set, InitializeSessionAsync throws this instead of succeeding.</summary>
         public Exception? InitFailure { get; set; }
+
+        /// <summary>Cancels the notification stream the way Grpc.Net.Client does.</summary>
+        public bool ReportCancellationAsRpcException { get; set; }
 
         /// <summary>Handshakes attempted, including session renewals on the same client.</summary>
         public int SessionInitializations => Volatile.Read(ref _sessionInitializations);
@@ -876,6 +989,26 @@ public class EngineRegressionTests
                 throw InitFailure;
 
             Initialized.TrySetResult(true);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>When set, ReauthenticateAsync throws this instead of succeeding.</summary>
+        public Exception? ReauthenticationFailure { get; set; }
+
+        /// <summary>Credentials each in-place handshake was asked to switch to.</summary>
+        public ConcurrentQueue<SonyCredentials> Reauthentications { get; } = new();
+        public TaskCompletionSource<bool> Reauthenticated { get; } = NewSignal();
+
+        public Task ReauthenticateAsync(SonyCredentials credentials, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref _sessionInitializations);
+            Reauthentications.Enqueue(credentials);
+
+            if (ReauthenticationFailure is not null)
+                throw ReauthenticationFailure;
+
+            Reauthenticated.TrySetResult(true);
             return Task.CompletedTask;
         }
 
@@ -903,6 +1036,7 @@ public class EngineRegressionTests
             CancellationToken ct = default)
         {
             Commands.Enqueue(path);
+            CommandValues.Enqueue((path, (object?)intValue ?? (object?)boolValue ?? stringValue));
             CommandReceived.TrySetResult(true);
 
             if (CommandHandler != null)
@@ -922,6 +1056,10 @@ public class EngineRegressionTests
             try
             {
                 await EndNotifications.Task.WaitAsync(ct);
+            }
+            catch (OperationCanceledException) when (ReportCancellationAsRpcException && ct.IsCancellationRequested)
+            {
+                throw new RpcException(new Status(StatusCode.Cancelled, "Call canceled by the client."));
             }
             finally
             {

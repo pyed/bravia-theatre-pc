@@ -88,7 +88,7 @@ public partial class SettingsWindow : Window
         }
 
         string keyStr = key.ToString();
-        if (keyStr.StartsWith("D") && keyStr.Length == 2 && char.IsDigit(keyStr[1]))
+        if (keyStr.Length == 2 && keyStr[0] == 'D' && char.IsAsciiDigit(keyStr[1]))
             keyStr = keyStr[1].ToString();
 
         modifiers.Add(keyStr);
@@ -152,8 +152,19 @@ public partial class SettingsWindow : Window
             return;
         }
 
+        var startWithWindows = ChkStartWithWindows.IsChecked ?? false;
+        if (startWithWindows
+            && !AutoStartService.IsAutoStartEnabled()
+            && AutoStartService.IsTemporaryLocation(AutoStartService.GetExecutablePath(), Path.GetTempPath()))
+        {
+            MessageBox.Show(this,
+                "BRAVIA Theatre PC is running from a temporary folder, for example straight from the downloaded zip. Extract the zip to a permanent folder and start it from there, then turn on Start with Windows.",
+                "Could Not Save Startup Setting", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ChkStartWithWindows.Focus();
+            return;
+        }
+
         var updated = _settings.Copy();
-        updated.StartWithWindows = ChkStartWithWindows.IsChecked ?? false;
         updated.ShowRearSpeaker = ChkShowRearSpeaker.IsChecked ?? false;
         updated.EnableGlobalHotkeys = ChkEnableGlobalHotkeys.IsChecked ?? true;
         updated.HotkeyVolumeUp = TxtHotkeyVolUp.Text.Trim();
@@ -179,7 +190,7 @@ public partial class SettingsWindow : Window
         }
 
         var previousAutoStart = AutoStartService.IsAutoStartEnabled();
-        if (!AutoStartService.TrySetAutoStart(updated.StartWithWindows, out var startupError))
+        if (!AutoStartService.TrySetAutoStart(startWithWindows, out var startupError))
         {
             MessageBox.Show(this, startupError, "Could Not Save Startup Setting",
                 MessageBoxButton.OK, MessageBoxImage.Error);

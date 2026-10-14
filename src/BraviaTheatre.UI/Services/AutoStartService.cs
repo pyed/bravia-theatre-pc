@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using Microsoft.Win32;
 
 namespace BraviaTheatre.UI.Services;
@@ -55,7 +56,15 @@ public static class AutoStartService
         }
     }
 
-    public static bool SetAutoStart(bool enable) => TrySetAutoStart(enable, out _);
+    /// <summary>
+    /// True when the executable runs from inside the temp folder, as it does when started straight
+    /// from the release zip. A Run entry for that path would start nothing once the folder is gone.
+    /// </summary>
+    internal static bool IsTemporaryLocation(string executablePath, string tempPath)
+    {
+        var temp = Path.TrimEndingDirectorySeparator(Path.GetFullPath(tempPath)) + Path.DirectorySeparatorChar;
+        return Path.GetFullPath(executablePath).StartsWith(temp, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string? NormalizeCommand(string? value)
     {

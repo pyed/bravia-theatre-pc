@@ -196,7 +196,7 @@
                             AutomationProperties.Name="Input source">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock x:Name="TxtHeaderInput" Text="HDMI" VerticalAlignment="Center"/>
-                            <TextBlock Text="&#xE70D;" FontFamily="Segoe Fluent Icons" FontSize="10" Margin="8,1,0,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="&#xE70D;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="10" Margin="8,1,0,0" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
 
@@ -277,7 +277,7 @@
                                 Background="{DynamicResource ControlFillColorSecondaryBrush}"
                                 VerticalAlignment="Top">
                             <TextBlock Text="&#xE72E;"
-                                       FontFamily="Segoe Fluent Icons"
+                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
                                        FontSize="20"
                                        HorizontalAlignment="Center"
                                        VerticalAlignment="Center"/>

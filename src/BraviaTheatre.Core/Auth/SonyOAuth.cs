@@ -49,9 +49,7 @@ public static class SonyOAuth
         RandomNumberGenerator.Fill(bytes);
         var codeVerifier = Base64UrlEncode(bytes);
 
-        using var sha = SHA256.Create();
-        var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(codeVerifier));
-        var codeChallenge = Base64UrlEncode(hash);
+        var codeChallenge = Base64UrlEncode(SHA256.HashData(Encoding.UTF8.GetBytes(codeVerifier)));
 
         return (codeVerifier, codeChallenge);
     }
@@ -95,52 +93,6 @@ public static class SonyOAuth
 
         var authUrl = $"{AuthBaseUrl}/user/authorize?{query}";
         return (authUrl, codeVerifier, state);
-    }
-
-    public static string ParseAuthorizationCode(string redirectOrCode)
-    {
-        var value = redirectOrCode.Trim();
-
-        // 1. Full URI like ssh-app://signin?code=XYZ&state=... or https://...
-        if (value.StartsWith("ssh-app://", StringComparison.OrdinalIgnoreCase) || value.Contains("://"))
-        {
-            try
-            {
-                var fixedUri = value.StartsWith("ssh-app://", StringComparison.OrdinalIgnoreCase)
-                    ? "https://" + value["ssh-app://".Length..]
-                    : value;
-
-                var uri = new Uri(fixedUri);
-                var query = HttpUtility.ParseQueryString(uri.Query);
-                var code = query.Get("code");
-                if (!string.IsNullOrEmpty(code))
-                    return code.Trim();
-            }
-            catch
-            {
-                // Fallback to substring extraction
-            }
-        }
-
-        // 2. Query string chunk with code=
-        if (value.Contains("code="))
-        {
-            var idx = value.IndexOf("code=", StringComparison.OrdinalIgnoreCase);
-            var sub = value[(idx + 5)..];
-            var ampIdx = sub.IndexOf('&');
-            if (ampIdx >= 0)
-                sub = sub[..ampIdx];
-            return sub.Trim();
-        }
-
-        // 3. User pasted "code&state=..."
-        if (value.Contains("&state="))
-        {
-            var ampIdx = value.IndexOf("&state=", StringComparison.OrdinalIgnoreCase);
-            return value[..ampIdx].Trim();
-        }
-
-        return value;
     }
 
     public static SonyOAuthCallback ParseAuthorizationCallback(string callbackUri)

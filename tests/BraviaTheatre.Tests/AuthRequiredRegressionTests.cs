@@ -260,6 +260,41 @@ public class AuthRequiredRegressionTests
     }
 
     [Fact]
+    public async Task SignInRequirementIsLoggedAtTheDefaultLevel()
+    {
+        // The level used to be guessed from the wording, which put this at Verbose: the default
+        // Critical log never said why the app asked the user to sign in again.
+        var stale = Credentials("revoked", DateTimeOffset.UtcNow.AddMinutes(1));
+        var authRequired = NewSignal();
+        var logs = new System.Collections.Concurrent.ConcurrentQueue<(string Message, BraviaTheatre.Core.DiagnosticLevel Level)>();
+        var lifecycle = Lifecycle(stale, (_, _) =>
+            throw new SonyOAuthException(SonyOAuthFailureKind.ReauthenticationRequired, "authorization revoked"));
+        var engine = CreateEngine(lifecycle, () => new FakeBraviaClient());
+        engine.LogAction = (message, level) => logs.Enqueue((message, level));
+        engine.StateChanged += state =>
+        {
+            if (state.AuthRequired) authRequired.TrySetResult(true);
+        };
+
+        try
+        {
+            engine.Start();
+            await authRequired.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+
+            Assert.Contains(logs, entry =>
+                entry.Message.Contains("interactive authentication required", StringComparison.Ordinal)
+                && entry.Level == BraviaTheatre.Core.DiagnosticLevel.Critical);
+            Assert.Contains(logs, entry =>
+                entry.Message.Contains("[Credential renewal] Trigger=proactive", StringComparison.Ordinal)
+                && entry.Level == BraviaTheatre.Core.DiagnosticLevel.Critical);
+        }
+        finally
+        {
+            await StopEngineAsync(engine);
+        }
+    }
+
+    [Fact]
     public async Task StaleDeviceAssociation_OffersRecoveryWithoutAuthenticationPrompt()
     {
         var stale = Credentials("stale", DateTimeOffset.UtcNow.AddMinutes(1));
@@ -696,7 +731,7 @@ public class AuthRequiredRegressionTests
             4000,
             (_, _, _) => client,
             static (_, ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct));
-        engine.LogAction = logs.Add;
+        engine.LogAction = (message, _) => logs.Add(message);
 
         try
         {
@@ -732,7 +767,7 @@ public class AuthRequiredRegressionTests
             return Task.FromResult(current);
         });
         var engine = CreateEngine(lifecycle, () => client);
-        engine.LogAction = logs.Add;
+        engine.LogAction = (message, _) => logs.Add(message);
 
         try
         {
@@ -751,12 +786,82 @@ public class AuthRequiredRegressionTests
     }
 
     [Fact]
-    public async Task KeepaliveBoundary_ReconnectsAndRenewsAuthoritativeSnapshot()
+    public async Task KeepaliveBoundary_RenewsCredentialsOnTheOpenConnection()
     {
         var original = Credentials("original", DateTimeOffset.UtcNow.AddHours(1));
         var nearExpiry = Credentials("near", DateTimeOffset.UtcNow.AddMinutes(1));
         var renewed = Credentials("renewed", DateTimeOffset.UtcNow.AddHours(12));
-        var first = new FakeBraviaClient();
+        var client = new FakeBraviaClient();
+        var keepaliveDelayStarted = NewSignal();
+        var releaseKeepalive = NewSignal();
+        var keepaliveCount = 0;
+        var clientCount = 0;
+        var refreshCount = 0;
+        var disconnects = 0;
+        var lifecycle = Lifecycle(original, (_, _) =>
+        {
+            Interlocked.Increment(ref refreshCount);
+            return Task.FromResult(renewed);
+        });
+        var engine = new BraviaEngine(
+            lifecycle,
+            "192.168.1.50",
+            4000,
+            (_, _, _) =>
+            {
+                Interlocked.Increment(ref clientCount);
+                return client;
+            },
+            (delay, ct) =>
+            {
+                if (delay == TimeSpan.FromSeconds(25)
+                    && Interlocked.Increment(ref keepaliveCount) == 1)
+                {
+                    keepaliveDelayStarted.TrySetResult(true);
+                    return releaseKeepalive.Task.WaitAsync(ct);
+                }
+
+                return Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            });
+        engine.StateChanged += state =>
+        {
+            if (!state.Connected) Interlocked.Increment(ref disconnects);
+        };
+
+        try
+        {
+            engine.Start();
+            await keepaliveDelayStarted.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+            var generation = engine.ActiveConnectionGeneration;
+            var install = await lifecycle.InstallAsync(nearExpiry, TestContext.Current.CancellationToken);
+            Assert.Equal(CredentialRenewalStatus.Succeeded, install.Status);
+
+            releaseKeepalive.TrySetResult(true);
+            await client.Reauthenticated.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+            await client.NotificationsReopened.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, Volatile.Read(ref refreshCount));
+            Assert.Same(renewed, Assert.Single(client.Reauthentications));
+            Assert.Same(renewed, lifecycle.CurrentCredentials);
+            Assert.Equal(1, Volatile.Read(ref clientCount));
+            Assert.Equal(generation, engine.ActiveConnectionGeneration);
+            Assert.Equal(0, Volatile.Read(ref disconnects));
+            Assert.True(engine.CurrentState.Connected);
+        }
+        finally
+        {
+            releaseKeepalive.TrySetResult(true);
+            await StopEngineAsync(engine);
+        }
+    }
+
+    [Fact]
+    public async Task KeepaliveBoundary_ReconnectsWhenTheOpenConnectionRejectsRenewedCredentials()
+    {
+        var original = Credentials("original", DateTimeOffset.UtcNow.AddHours(1));
+        var nearExpiry = Credentials("near", DateTimeOffset.UtcNow.AddMinutes(1));
+        var renewed = Credentials("renewed", DateTimeOffset.UtcNow.AddHours(12));
+        var first = new FakeBraviaClient { ReauthenticationFailure = InvalidArgument("not on this connection") };
         var second = new FakeBraviaClient();
         var keepaliveDelayStarted = NewSignal();
         var releaseKeepalive = NewSignal();
@@ -809,10 +914,142 @@ public class AuthRequiredRegressionTests
             await UntilAsync(() => engine.CurrentState.Volume == 10);
 
             Assert.Equal(1, Volatile.Read(ref refreshCount));
+            Assert.Same(renewed, Assert.Single(first.Reauthentications));
             Assert.Same(renewed, secondClientCredentials);
             Assert.NotEqual(staleGeneration, engine.ActiveConnectionGeneration);
             engine.ApplyDeltaForConnection(staleGeneration, "volume", 99);
             Assert.Equal(10, engine.CurrentState.Volume);
+            Assert.False(engine.CurrentState.AuthRequired);
+        }
+        finally
+        {
+            releaseKeepalive.TrySetResult(true);
+            await StopEngineAsync(engine);
+        }
+    }
+
+    [Fact]
+    public async Task KeepaliveRenewalNeedingSignIn_EndsTheConnectionAndAsksForIt()
+    {
+        var original = Credentials("original", DateTimeOffset.UtcNow.AddHours(1));
+        var nearExpiry = Credentials("near", DateTimeOffset.UtcNow.AddMinutes(1));
+        var client = new FakeBraviaClient();
+        var keepaliveDelayStarted = NewSignal();
+        var releaseKeepalive = NewSignal();
+        var keepaliveCount = 0;
+        var reconnectCount = 0;
+        var clientCount = 0;
+        var refreshCount = 0;
+        var lifecycle = Lifecycle(original, (_, _) =>
+        {
+            Interlocked.Increment(ref refreshCount);
+            throw new SonyOAuthException(SonyOAuthFailureKind.ReauthenticationRequired, "revoked");
+        });
+        var engine = new BraviaEngine(
+            lifecycle,
+            "192.168.1.50",
+            4000,
+            (_, _, _) =>
+            {
+                Interlocked.Increment(ref clientCount);
+                return client;
+            },
+            (delay, ct) =>
+            {
+                if (delay == TimeSpan.FromSeconds(25)
+                    && Interlocked.Increment(ref keepaliveCount) == 1)
+                {
+                    keepaliveDelayStarted.TrySetResult(true);
+                    return releaseKeepalive.Task.WaitAsync(ct);
+                }
+
+                if (delay == TimeSpan.FromSeconds(5)
+                    && Interlocked.Increment(ref reconnectCount) == 1)
+                    return Task.CompletedTask;
+
+                return Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            });
+
+        try
+        {
+            engine.Start();
+            await keepaliveDelayStarted.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+            var install = await lifecycle.InstallAsync(nearExpiry, TestContext.Current.CancellationToken);
+            Assert.Equal(CredentialRenewalStatus.Succeeded, install.Status);
+
+            releaseKeepalive.TrySetResult(true);
+            await UntilAsync(() => engine.CurrentState.AuthRequired);
+
+            Assert.Equal(1, Volatile.Read(ref refreshCount));
+            Assert.Equal(1, Volatile.Read(ref clientCount));
+            Assert.Empty(client.Reauthentications);
+            Assert.False(engine.CurrentState.Connected);
+        }
+        finally
+        {
+            releaseKeepalive.TrySetResult(true);
+            await StopEngineAsync(engine);
+        }
+    }
+
+    [Fact]
+    public async Task KeepaliveRenewalTransientFailure_KeepsTheConnectionWithoutRetryingEachPoll()
+    {
+        var original = Credentials("original", DateTimeOffset.UtcNow.AddHours(1));
+        var nearExpiry = Credentials("near", DateTimeOffset.UtcNow.AddMinutes(1));
+        var client = new FakeBraviaClient();
+        var keepaliveDelayStarted = NewSignal();
+        var releaseKeepalive = NewSignal();
+        var laterPollsDone = NewSignal();
+        var keepaliveCount = 0;
+        var clientCount = 0;
+        var refreshCount = 0;
+        var lifecycle = Lifecycle(original, (_, _) =>
+        {
+            Interlocked.Increment(ref refreshCount);
+            throw new SonyOAuthException(SonyOAuthFailureKind.Transient, "cloud unavailable");
+        });
+        var engine = new BraviaEngine(
+            lifecycle,
+            "192.168.1.50",
+            4000,
+            (_, _, _) =>
+            {
+                Interlocked.Increment(ref clientCount);
+                return client;
+            },
+            (delay, ct) =>
+            {
+                if (delay != TimeSpan.FromSeconds(25))
+                    return Task.Delay(Timeout.InfiniteTimeSpan, ct);
+
+                switch (Interlocked.Increment(ref keepaliveCount))
+                {
+                    case 1:
+                        keepaliveDelayStarted.TrySetResult(true);
+                        return releaseKeepalive.Task.WaitAsync(ct);
+                    case <= 3:
+                        return Task.CompletedTask;
+                    default:
+                        laterPollsDone.TrySetResult(true);
+                        return Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                }
+            });
+
+        try
+        {
+            engine.Start();
+            await keepaliveDelayStarted.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+            var install = await lifecycle.InstallAsync(nearExpiry, TestContext.Current.CancellationToken);
+            Assert.Equal(CredentialRenewalStatus.Succeeded, install.Status);
+
+            releaseKeepalive.TrySetResult(true);
+            await laterPollsDone.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, Volatile.Read(ref refreshCount));
+            Assert.Equal(1, Volatile.Read(ref clientCount));
+            Assert.Empty(client.Reauthentications);
+            Assert.True(engine.CurrentState.Connected);
             Assert.False(engine.CurrentState.AuthRequired);
         }
         finally

@@ -34,18 +34,27 @@ public class PublishFootprintTests
         Assert.Contains("<PublishReadyToRun>true</PublishReadyToRun>", project, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void NativeLibrariesTravelInsideTheExecutableBecauseTheReleaseShipsNothingElse()
+    {
+        var project = ReadRepositoryFile(Path.Combine("src", "BraviaTheatre.UI", "BraviaTheatre.UI.csproj"));
+
+        Assert.Contains("<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>", project, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
-    public void NoPublishCommandReenablesBundleCompressionOnTheCommandLine(int instructionIndex)
+    public void NoPublishCommandOverridesTheBundleSettingsOnTheCommandLine(int instructionIndex)
     {
         // A command-line -p: switch silently overrides the project setting, so the
-        // guard above is only meaningful while the workflows and documented publish
-        // command leave it alone.
+        // guards above are only meaningful while the workflows and documented publish
+        // command leave them alone.
         var instructions = ReadRepositoryFile(PublishInstructions[instructionIndex]);
 
         Assert.DoesNotContain("EnableCompressionInSingleFile", instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("IncludeNativeLibrariesForSelfExtract", instructions, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

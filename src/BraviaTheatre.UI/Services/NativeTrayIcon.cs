@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
+using static BraviaTheatre.UI.Services.NativeMethods;
 
 namespace BraviaTheatre.UI.Services;
 
@@ -16,6 +17,7 @@ public sealed class NativeTrayIcon : IDisposable
     private const int WM_CONTEXTMENU = 0x007B;
     private const int NIN_SELECT = WM_USER;
     private const int NIN_KEYSELECT = WM_USER + 1;
+    private const int NIN_BALLOONUSERCLICK = WM_USER + 5;
 
     private const int NIM_ADD = 0x00000000;
     private const int NIM_MODIFY = 0x00000001;
@@ -27,17 +29,25 @@ public sealed class NativeTrayIcon : IDisposable
     private const int NIF_MESSAGE = 0x00000001;
     private const int NIF_ICON = 0x00000002;
     private const int NIF_TIP = 0x00000004;
+    private const int NIF_INFO = 0x00000010;
     // Version 4 suppresses the shell tooltip unless NIF_SHOWTIP is requested.
     private const int NIF_SHOWTIP = 0x00000080;
     internal const int PresentationFlags =
         NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
+
+    // The tray icon itself, at full size, and no notification during quiet time.
+    private const int NIIF_USER = 0x00000004;
+    private const int NIIF_LARGE_ICON = 0x00000020;
+    private const int NIIF_RESPECT_QUIET_TIME = 0x00000080;
+    internal const int NotificationFlags = NIIF_USER | NIIF_LARGE_ICON | NIIF_RESPECT_QUIET_TIME;
 
     internal enum TrayCallbackAction
     {
         None,
         ToggleMouse,
         ToggleKeyboard,
-        ContextMenu
+        ContextMenu,
+        NotificationClicked
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -86,12 +96,6 @@ public sealed class NativeTrayIcon : IDisposable
         ref NOTIFYICONIDENTIFIER identifier,
         out RECT iconLocation);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern uint RegisterWindowMessage(string lpString);
-
-    [DllImport("user32.dll")]
-    private static extern int GetMessageTime();
-
     private readonly HwndSource _hwndSource;
     private readonly IntPtr _hwnd;
     private readonly uint _wmTaskbarCreated;
@@ -108,9 +112,8 @@ public sealed class NativeTrayIcon : IDisposable
     internal Action<TrayActivation>? ToggleAction { get; set; }
     public Action? ShowAction { get; set; }
     public Action? IconRecreatedAction { get; set; }
+    public Action? NotificationClickedAction { get; set; }
     public Action<string>? LogAction { get; set; }
-
-    public Action? LeftClickAction { get; set; }
 
     public NativeTrayIcon()
     {
@@ -150,6 +153,22 @@ public sealed class NativeTrayIcon : IDisposable
         if (_disposed) return false;
         SetPresentation(icon, tooltip);
         return _isAdded && Modify();
+    }
+
+    /// <summary>Shows a notification from the tray icon; Windows presents it as a toast.</summary>
+    public bool ShowNotification(string title, string text)
+    {
+        if (_disposed || !_isAdded) return false;
+
+        var notification = _nid;
+        notification.uFlags = NIF_INFO;
+        notification.szInfoTitle = title.Length > 63 ? title[..63] : title;
+        notification.szInfo = text.Length > 255 ? text[..255] : text;
+        notification.dwInfoFlags = NotificationFlags;
+        if (Shell_NotifyIcon(NIM_MODIFY, ref notification)) return true;
+
+        LogAction?.Invoke($"Tray notification failed (Win32 error {Marshal.GetLastWin32Error()}).");
+        return false;
     }
 
     internal bool TryGetIconBounds(out PixelRect bounds)
@@ -219,12 +238,17 @@ public sealed class NativeTrayIcon : IDisposable
                         : TrayActivationKind.Mouse,
                     _usesVersion4 ? DecodeCallbackPoint(wParam) : null,
                     unchecked((uint)GetMessageTime()));
-                HandleToggle(activation);
+                ToggleAction?.Invoke(activation);
                 handled = true;
             }
             else if (action == TrayCallbackAction.ContextMenu)
             {
                 ContextMenuAction?.Invoke();
+                handled = true;
+            }
+            else if (action == TrayCallbackAction.NotificationClicked)
+            {
+                NotificationClickedAction?.Invoke();
                 handled = true;
             }
         }
@@ -251,12 +275,14 @@ public sealed class NativeTrayIcon : IDisposable
                 NIN_SELECT => TrayCallbackAction.ToggleMouse,
                 NIN_KEYSELECT => TrayCallbackAction.ToggleKeyboard,
                 WM_CONTEXTMENU => TrayCallbackAction.ContextMenu,
+                NIN_BALLOONUSERCLICK => TrayCallbackAction.NotificationClicked,
                 _ => TrayCallbackAction.None
             }
             : eventId switch
             {
                 WM_LBUTTONUP => TrayCallbackAction.ToggleMouse,
                 WM_RBUTTONUP => TrayCallbackAction.ContextMenu,
+                NIN_BALLOONUSERCLICK => TrayCallbackAction.NotificationClicked,
                 _ => TrayCallbackAction.None
             };
 
@@ -266,17 +292,6 @@ public sealed class NativeTrayIcon : IDisposable
         return new PixelPoint(
             unchecked((short)(packed & 0xffff)),
             unchecked((short)((packed >> 16) & 0xffff)));
-    }
-
-    private void HandleToggle(TrayActivation activation)
-        => InvokeToggle(activation);
-
-    private void InvokeToggle(TrayActivation activation)
-    {
-        if (ToggleAction != null)
-            ToggleAction.Invoke(activation);
-        else
-            LeftClickAction?.Invoke();
     }
 
     internal void RestoreTrayFocus()

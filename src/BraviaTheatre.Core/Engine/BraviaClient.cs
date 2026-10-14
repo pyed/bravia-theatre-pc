@@ -43,20 +43,27 @@ public sealed class BraviaClient : IBraviaClient
 
     private readonly GrpcChannel _channel;
     private readonly ControlDeviceService.ControlDeviceServiceClient _protoClient;
-    private readonly SonyCredentials _creds;
+    private SonyCredentials _creds;
 
     private byte[]? _sessionRandom;
     private string _sessionId = string.Empty;
     private readonly SemaphoreSlim _sessionLock = new(1, 1);
+    private readonly HashSet<string> _reportedUnsupportedPaths = new(StringComparer.Ordinal);
 
-    public Action<string>? LogAction { get; set; }
+    public Action<string, DiagnosticLevel>? LogAction { get; set; }
 
     public BraviaClient(string host, int port, SonyCredentials credentials)
+        : this(host, port, credentials, CreateChannelOptions())
+    {
+    }
+
+    // Tests pass options whose handler answers like the soundbar.
+    internal BraviaClient(string host, int port, SonyCredentials credentials, GrpcChannelOptions options)
     {
         _creds = credentials;
         _sessionId = credentials.SessionId;
 
-        _channel = GrpcChannel.ForAddress(ControlEndpoint.CreateAddress(host, port), CreateChannelOptions());
+        _channel = GrpcChannel.ForAddress(ControlEndpoint.CreateAddress(host, port), options);
         _protoClient = new ControlDeviceService.ControlDeviceServiceClient(_channel);
     }
 
@@ -76,24 +83,45 @@ public sealed class BraviaClient : IBraviaClient
         MaxSendMessageSize = 16 * 1024 * 1024
     };
 
-    public async Task InitializeSessionAsync(CancellationToken ct = default)
+    public Task InitializeSessionAsync(CancellationToken ct = default) => HandshakeAsync(null, ct);
+
+    public Task ReauthenticateAsync(SonyCredentials credentials, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(credentials);
+        return HandshakeAsync(credentials, ct);
+    }
+
+    private async Task HandshakeAsync(SonyCredentials? renewed, CancellationToken ct)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(8));
 
         await _sessionLock.WaitAsync(cts.Token);
+        var previous = (Credentials: _creds, Random: _sessionRandom, SessionId: _sessionId);
         try
         {
+            // Swapped under the session lock, so no call signs with one key for another session.
+            if (renewed != null)
+            {
+                _creds = renewed;
+                _sessionRandom = null;
+                _sessionId = renewed.SessionId;
+            }
+
             // 1. ConfirmSignin: SHA256 of device_id
-            using var sha = SHA256.Create();
-            var devIdBytes = Encoding.UTF8.GetBytes(_creds.DeviceId ?? string.Empty);
-            var authData = sha.ComputeHash(devIdBytes);
+            var authData = SHA256.HashData(Encoding.UTF8.GetBytes(_creds.DeviceId ?? string.Empty));
 
             var signinReq = new ConfirmSigninRequest
             {
                 AuthData = ByteString.CopyFrom(authData)
             };
-            await _protoClient.ConfirmSigninAsync(signinReq, cancellationToken: cts.Token);
+            var signin = await _protoClient.ConfirmSigninAsync(signinReq, cancellationToken: cts.Token);
+            if (!signin.Success)
+            {
+                // Recorded rather than enforced: proto3 reads an absent field as false, and
+                // devices that leave it unset accept the session anyway.
+                LogAction?.Invoke("[Handshake] ConfirmSignin did not report success; continuing.", DiagnosticLevel.Verbose);
+            }
 
             // 2. ConfirmKeys: HMAC-SHA256 of session_id using hmac_key
             var sessId = _creds.SessionId;
@@ -112,6 +140,11 @@ public sealed class BraviaClient : IBraviaClient
             var resp = await _protoClient.GetSessionRandomAsync(req, cancellationToken: cts.Token);
 
             ApplySessionRandomResponse(resp, sessId);
+        }
+        catch when (renewed != null)
+        {
+            (_creds, _sessionRandom, _sessionId) = previous;
+            throw;
         }
         finally
         {
@@ -136,7 +169,12 @@ public sealed class BraviaClient : IBraviaClient
             }
             catch (RpcException ex) when (IsUnsupportedPathStatus(ex.StatusCode))
             {
-                LogAction?.Invoke($"[Query] Path '{path}' unsupported ({ex.StatusCode}).");
+                // A model without a feature rejects its path on every 25 s keepalive; report it
+                // once per connection instead of filling the log.
+                bool firstTime;
+                lock (_reportedUnsupportedPaths) firstTime = _reportedUnsupportedPaths.Add(path);
+                if (firstTime)
+                    LogAction?.Invoke($"[Query] Path '{path}' unsupported ({ex.StatusCode}).", DiagnosticLevel.Verbose);
             }
         }
         return result;

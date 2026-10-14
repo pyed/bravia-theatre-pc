@@ -98,5 +98,11 @@ jobs:
       - name: Verify publish outputs
         shell: pwsh
         run: |
-          if (-not (Test-Path -LiteralPath "artifacts/standalone/BraviaTheatrePC.exe")) { throw "Standalone executable was not published." }
-          if (-not (Test-Path -LiteralPath "artifacts/framework-dependent/BraviaTheatrePC.exe")) { throw "Framework-dependent executable was not published." }
+          # The release ships only the executable, so anything published beside it would be
+          # missing on users' machines.
+          foreach ($variant in "standalone", "framework-dependent") {
+            $files = @(Get-ChildItem -LiteralPath "artifacts/$variant" -Recurse -File | ForEach-Object { $_.Name })
+            if ($files.Count -ne 1 -or $files[0] -ne "BraviaTheatrePC.exe") {
+              throw "The $variant publish must contain only BraviaTheatrePC.exe; found: $($files -join ', ')."
+            }
+          }

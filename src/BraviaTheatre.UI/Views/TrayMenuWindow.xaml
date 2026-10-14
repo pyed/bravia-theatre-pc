@@ -88,7 +88,7 @@
                         <ColumnDefinition Width="30"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="&#xE8A7;" FontFamily="Segoe Fluent Icons" FontSize="17" VerticalAlignment="Center"/>
+                    <TextBlock Text="&#xE8A7;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="1" Text="Open quick controls" FontSize="14" VerticalAlignment="Center"/>
                 </Grid>
             </Button>
@@ -101,7 +101,7 @@
                         <ColumnDefinition Width="30"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons" FontSize="17" VerticalAlignment="Center"/>
+                    <TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="1" Text="Settings" FontSize="14" VerticalAlignment="Center"/>
                 </Grid>
             </Button>
@@ -114,7 +114,7 @@
                         <ColumnDefinition Width="30"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="&#xE77B;" FontFamily="Segoe Fluent Icons" FontSize="17" VerticalAlignment="Center"/>
+                    <TextBlock Text="&#xE77B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="1" Text="Sony account setup" FontSize="14" VerticalAlignment="Center"/>
                 </Grid>
             </Button>
@@ -131,7 +131,7 @@
                         <ColumnDefinition Width="30"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="&#xE8BB;" FontFamily="Segoe Fluent Icons" FontSize="17" VerticalAlignment="Center"/>
+                    <TextBlock Text="&#xE8BB;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="1" Text="Exit" FontSize="14" VerticalAlignment="Center"/>
                 </Grid>
             </Button>

@@ -1,12 +1,18 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Text.Json;
+using BraviaTheatre.UI.Services;
 
 namespace BraviaTheatre.UI.Models;
 
 public sealed class AppSettings
 {
-    public bool StartWithWindows { get; set; }
+    private static readonly JsonSerializerOptions ReadOptions = new() { PropertyNameCaseInsensitive = true };
+    private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
+
+    // Starting with Windows is not stored here: the registry Run entry is the only state that
+    // matters, and a copy in this file drifted from it (see AutoStartService).
     public bool TrayIconGuidanceShown { get; set; }
     public bool ShowRearSpeaker { get; set; }
     public bool EnableGlobalHotkeys { get; set; } = true;
@@ -23,8 +29,6 @@ public sealed class AppSettings
     public string LogLevel { get; set; } = "Critical";
 
     public static string SettingsFilePath => Path.Combine(App.GetAppDataDir(), "settings.json");
-
-    public static AppSettings Load() => Load(out _);
 
     public AppSettings Copy() => (AppSettings)MemberwiseClone();
 
@@ -58,9 +62,9 @@ public sealed class AppSettings
         {
             var directory = Path.GetDirectoryName(SettingsFilePath)!;
             Directory.CreateDirectory(directory);
-            var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+            var json = JsonSerializer.Serialize(this, WriteOptions);
             tempPath = Path.Combine(directory, $".settings.{Guid.NewGuid():N}.tmp");
-            File.WriteAllText(tempPath, json);
+            DurableFile.WriteNew(tempPath, Encoding.UTF8.GetBytes(json));
             File.Move(tempPath, SettingsFilePath, true);
             return true;
         }
@@ -79,8 +83,6 @@ public sealed class AppSettings
         }
     }
 
-    public void Save() => TrySave(out _);
-
     private static bool TryRead(string path, out AppSettings? settings, out string? error)
     {
         settings = null;
@@ -88,10 +90,7 @@ public sealed class AppSettings
         try
         {
             var json = File.ReadAllText(path);
-            settings = JsonSerializer.Deserialize<AppSettings>(json, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
+            settings = JsonSerializer.Deserialize<AppSettings>(json, ReadOptions);
             if (settings == null) throw new JsonException("The settings document is empty.");
             settings.StaticPort = settings.StaticPort is >= 1 and <= 65535 ? settings.StaticPort : 55051;
             return true;

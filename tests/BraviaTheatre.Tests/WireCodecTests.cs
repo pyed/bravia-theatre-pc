@@ -125,18 +125,6 @@ public class WireCodecTests
         Assert.False(CommandBuilder.ParseExecResponse(new byte[] { 0x08, 0x01, 0x10, 0x01 }));
     }
 
-    [Theory]
-    [InlineData("ssh-app://signin?code=AUTH123&state=STATE456", "AUTH123")]
-    [InlineData("https://example.com/signin?code=AUTH123&state=STATE456", "AUTH123")]
-    [InlineData("AUTH123&state=STATE456", "AUTH123")]
-    [InlineData("code=AUTH123&state=STATE456", "AUTH123")]
-    [InlineData("AUTH123", "AUTH123")]
-    public void TestParseAuthorizationCode(string input, string expectedCode)
-    {
-        var code = BraviaTheatre.Core.Auth.SonyOAuth.ParseAuthorizationCode(input);
-        Assert.Equal(expectedCode, code);
-    }
-
     [Fact]
     public void ParseGetStatesResponseSkipsOpaqueMetadata()
     {

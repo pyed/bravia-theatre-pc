@@ -11,6 +11,9 @@ public class ControlEndpointTests
     [InlineData("soundbar", "soundbar")]
     [InlineData("fe80::1", "fe80::1")]
     [InlineData("[fd00::20]", "fd00::20")]
+    // Zero-padded octets are decimal, as a person means them; IPAddress.Parse reads them as octal.
+    [InlineData("192.168.1.010", "192.168.1.10")]
+    [InlineData("010.000.000.001", "10.0.0.1")]
     public void AcceptsBareHostNamesAndAddresses(string input, string expected)
     {
         Assert.True(ControlEndpoint.TryNormalizeHost(input, out var host));
@@ -37,6 +40,7 @@ public class ControlEndpointTests
     public void CreateAddressBracketsIPv6Literals()
     {
         Assert.Equal("http://192.168.1.50:55051/", ControlEndpoint.CreateAddress("192.168.1.50", 55051).AbsoluteUri);
+        Assert.Equal("http://192.168.1.10:55051/", ControlEndpoint.CreateAddress("192.168.001.010", 55051).AbsoluteUri);
         Assert.Equal("http://[fd00::20]:55051/", ControlEndpoint.CreateAddress("fd00::20", 55051).AbsoluteUri);
         Assert.Equal("http://[fd00::20]:55051/", ControlEndpoint.CreateAddress("[fd00::20]", 55051).AbsoluteUri);
         Assert.Equal(55051, ControlEndpoint.CreateAddress("fe80::1%12", 55051).Port);

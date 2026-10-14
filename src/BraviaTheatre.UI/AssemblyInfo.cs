@@ -1,4 +1,9 @@
+using System.Runtime.InteropServices;
 using System.Windows;
+
+// Every native import in this assembly is a Windows system DLL, so none may resolve from the
+// application or current directory.
+[assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
 
 [assembly: ThemeInfo(
     ResourceDictionaryLocation.None,            //where theme specific resource dictionaries are located

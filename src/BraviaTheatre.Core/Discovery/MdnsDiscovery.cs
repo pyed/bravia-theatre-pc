@@ -383,11 +383,6 @@ public static class MdnsDiscovery
             : null;
     }
 
-    public static List<IPAddress> GetActiveIPv4Addresses()
-    {
-        return GetActiveIPv4Interfaces().Select(static network => network.Address).ToList();
-    }
-
     internal static List<ActiveIPv4Interface> GetActiveIPv4Interfaces()
     {
         var result = new List<ActiveIPv4Interface>();

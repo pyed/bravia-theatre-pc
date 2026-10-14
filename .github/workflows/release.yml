@@ -58,6 +58,14 @@ jobs:
       - name: Prepare release assets and checksums
         shell: pwsh
         run: |
+          # Only the executables are released, so nothing may be published beside them.
+          foreach ($variant in "standalone", "framework-dependent") {
+            $files = @(Get-ChildItem -LiteralPath "publish/$variant" -Recurse -File | ForEach-Object { $_.Name })
+            if ($files.Count -ne 1 -or $files[0] -ne "BraviaTheatrePC.exe") {
+              throw "The $variant publish must contain only BraviaTheatrePC.exe; found: $($files -join ', ')."
+            }
+          }
+
           Move-Item -LiteralPath "publish/framework-dependent/BraviaTheatrePC.exe" -Destination "publish/BraviaTheatrePC-FrameworkDependent.exe"
           Move-Item -LiteralPath "publish/standalone/BraviaTheatrePC.exe" -Destination "publish/BraviaTheatrePC.exe"
 

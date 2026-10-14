@@ -284,13 +284,6 @@ internal sealed class FlyoutTransitionController
 
     public void ResolveTrayInteraction() => _suppressCorrelatedTrayToggle = false;
 
-    public void ForceHidden()
-    {
-        _generation++;
-        _suppressCorrelatedTrayToggle = false;
-        State = FlyoutPresentationState.Hidden;
-    }
-
     private FlyoutTransition NewTransition(FlyoutPresentationState target) =>
         new(++_generation, target);
 }

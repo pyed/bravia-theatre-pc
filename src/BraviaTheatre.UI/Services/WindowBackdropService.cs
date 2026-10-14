@@ -6,6 +6,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using static BraviaTheatre.UI.Services.NativeMethods;
 
 namespace BraviaTheatre.UI.Services;
 
@@ -41,11 +42,6 @@ internal static class WindowBackdropService
     private const int AccentDisabled = 0;
     private const int AccentEnableAcrylicBlurBehind = 4;
     private const int AccentDrawAllBorders = 2;
-    private const uint SwpNoSize = 0x0001;
-    private const uint SwpNoMove = 0x0002;
-    private const uint SwpNoZOrder = 0x0004;
-    private const uint SwpNoActivate = 0x0010;
-    private const uint SwpFrameChanged = 0x0020;
 
     private const int WmSysColorChange = 0x0015;
     private const int WmDisplayChange = 0x007E;
@@ -98,16 +94,6 @@ internal static class WindowBackdropService
     private static extern int SetWindowCompositionAttribute(
         IntPtr hwnd,
         ref WindowCompositionAttributeData data);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetWindowPos(
-        IntPtr hwnd,
-        IntPtr insertAfter,
-        int x,
-        int y,
-        int width,
-        int height,
-        uint flags);
 
     public static void Attach(Window window, WindowBackdropKind kind)
     {

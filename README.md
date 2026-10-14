@@ -59,6 +59,8 @@ Download the appropriate build from [GitHub Releases](../../releases):
 
 Run the executable and complete Sony sign-in when prompted.
 
+Each version unpacks a few native libraries into `%TEMP%\.net\BraviaTheatrePC` the first time it runs, and removes the folders earlier versions left there.
+
 Keep the executable at a stable path so Windows can retain your tray-icon placement choice across updates. The first launch offers to open **Taskbar settings**, where you can enable BRAVIA Theatre PC under **Other system tray icons** or drag it from the hidden-icons menu next to the clock.
 
 ### Run from source

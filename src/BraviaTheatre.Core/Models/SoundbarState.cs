@@ -14,7 +14,6 @@ public sealed record SoundbarState
     public string Function { get; init; } = "hdmi";
     public string? Codec { get; init; }
     public string? Channel { get; init; }
-    public string? Input { get; init; }
     public bool AuthRequired { get; init; }
     public bool DeviceAssociationRequired { get; init; }
     public string? DeviceName { get; init; }
@@ -36,7 +35,6 @@ public sealed record SoundbarState
         Function = "hdmi",
         Codec = null,
         Channel = null,
-        Input = null,
         DeviceName = "BRAVIA Theatre",
         AuthRequired = false
     };

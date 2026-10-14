@@ -7,6 +7,11 @@
     <RootNamespace>BraviaTheatre.UI</RootNamespace>
     <AssemblyName>BraviaTheatrePC</AssemblyName>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- The release is one executable, so its native libraries travel inside it and the
+         host extracts them to %TEMP%\.net on start. BundledNativeLibraries keeps them
+         loaded so temp cleanup cannot delete them under the running app, and
+         BundleExtractionCleanup removes the folders earlier builds left there. -->
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <!-- Compressing the bundle forces every managed assembly to be decompressed into
          private memory on load. Left uncompressed they are mapped straight from the
@@ -14,7 +19,14 @@
          to 23 MB private working set. The release ships the executable in a zip, so
          the download stays the same size. -->
     <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+    <!-- With these the publish folder holds only the executable. The SDK already bundles
+         the WebView2 loader (and copies it under runtimes\ for a development build); the
+         package's own copy landed beside the executable as a stray duplicate. -->
+    <WebView2NeverCopyLoaderDllToOutputDirectory>true</WebView2NeverCopyLoaderDllToOutputDirectory>
+    <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
     <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- LibraryImport generates its marshalling code, which needs unsafe blocks. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Description>Native Windows 11 Fluent audio controller for Sony BRAVIA Theatre systems</Description>
   </PropertyGroup>
 

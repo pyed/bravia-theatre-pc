@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using BraviaTheatre.Core;
 using BraviaTheatre.Core.Auth;
 using BraviaTheatre.Core.Engine;
 using BraviaTheatre.Core.Models;
@@ -21,7 +22,6 @@ public partial class App : Application
 
     private BraviaEngine? _engine;
     private Action<SoundbarState>? _engineStateChangedHandler;
-    private long _engineGeneration;
     private FlyoutWindow? _flyout;
     private TrayMenuWindow? _trayMenu;
     private NativeTrayIcon? _trayIcon;
@@ -37,13 +37,26 @@ public partial class App : Application
     private bool _startupCompleted;
     private readonly ErrorDialogGate _errorDialogs = new();
 
-    private readonly object _pendingStateLock = new();
-    private PendingEngineState? _pendingState;
-    private int _stateDispatchPending;
+    private readonly EngineStateRelay _stateRelay;
     private SoundbarState _latestState = SoundbarState.Disconnected;
     private readonly TrayContextMenuCoordinator _trayMenuCoordinator = new();
+    private readonly TrayAttentionNotifier _attentionNotifier = new();
 
-    private readonly record struct PendingEngineState(long Generation, SoundbarState State);
+    public App()
+    {
+        _stateRelay = new EngineStateRelay(
+            action =>
+            {
+                if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return false;
+                Dispatcher.BeginInvoke(action);
+                return true;
+            },
+            state =>
+            {
+                if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+                    ApplyStateToUi(state);
+            });
+    }
 
     public static string GetAppDataDir()
     {
@@ -55,29 +68,22 @@ public partial class App : Application
         return dir;
     }
 
-    public enum AppLogLevel
-    {
-        Critical = 0,
-        Info = 1,
-        Verbose = 2
-    }
-
-    private static AppLogLevel _currentLogLevel = AppLogLevel.Critical;
+    private static DiagnosticLevel _currentLogLevel = DiagnosticLevel.Critical;
 
     public static void SetLogLevel(string? levelStr)
     {
         _currentLogLevel = levelStr?.ToLowerInvariant() switch
         {
-            "verbose" => AppLogLevel.Verbose,
-            "info" => AppLogLevel.Info,
-            _ => AppLogLevel.Critical
+            "verbose" => DiagnosticLevel.Verbose,
+            "info" => DiagnosticLevel.Info,
+            _ => DiagnosticLevel.Critical
         };
     }
 
     private static readonly object _logLock = new();
     private static DateTime _lastLogMaintenanceDate = DateTime.MinValue;
 
-    public static void Log(string message, AppLogLevel level)
+    public static void Log(string message, DiagnosticLevel level)
     {
         if (level > _currentLogLevel) return;
 
@@ -103,33 +109,9 @@ public partial class App : Application
         }
     }
 
-    public static void Log(string message)
-    {
-        bool isCritical = message.Contains("[Credential renewal]", StringComparison.Ordinal) ||
-                          message.Contains("error", StringComparison.OrdinalIgnoreCase) ||
-                          message.Contains("exception", StringComparison.OrdinalIgnoreCase) ||
-                          message.Contains("fatal", StringComparison.OrdinalIgnoreCase) ||
-                          message.Contains("failed", StringComparison.OrdinalIgnoreCase);
-
-        bool isInfo = message.Contains("Starting", StringComparison.OrdinalIgnoreCase) ||
-                      message.Contains("Discovered", StringComparison.OrdinalIgnoreCase) ||
-                      message.Contains("handshake completed", StringComparison.OrdinalIgnoreCase) ||
-                      message.Contains("stream started", StringComparison.OrdinalIgnoreCase) ||
-                      message.Contains("Connecting", StringComparison.OrdinalIgnoreCase) ||
-                      message.Contains("Credentials loaded", StringComparison.OrdinalIgnoreCase) ||
-                      message.Contains("Global hotkeys registered", StringComparison.OrdinalIgnoreCase) ||
-                      message.Contains("Tray Icon shown", StringComparison.OrdinalIgnoreCase) ||
-                      message.Contains("Shutting down", StringComparison.OrdinalIgnoreCase);
-
-        var level = isCritical ? AppLogLevel.Critical : (isInfo ? AppLogLevel.Info : AppLogLevel.Verbose);
-        Log(message, level);
-    }
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    private static extern uint RegisterWindowMessage(string lpString);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+    // Credential renewal diagnostics are rare and explain why sign-in was or was not requested,
+    // so every log level keeps them.
+    private static void LogCredentialDiagnostic(string message) => Log(message, DiagnosticLevel.Critical);
 
     private static readonly IntPtr HWND_BROADCAST = (IntPtr)0xffff;
 
@@ -138,12 +120,18 @@ public partial class App : Application
         // Prevent application from closing when modal dialogs close
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
+        // Hardware rendering loads the graphics driver's user-mode stack into the process on
+        // the first window and keeps it for good: with an NVIDIA card that was over 100 MB of
+        // private memory for a tray app that draws two small panels. The CPU draws them as
+        // well, and DWM still supplies the acrylic behind them.
+        System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+
         AppDomain.CurrentDomain.UnhandledException += (s, args) =>
         {
             var failure = args.ExceptionObject is Exception exception
                 ? FormatExceptionForLog(exception)
                 : args.ExceptionObject?.GetType().Name ?? "UnknownFailure";
-            Log($"FATAL UNHANDLED EXCEPTION: {failure}");
+            Log($"FATAL UNHANDLED EXCEPTION: {failure}", DiagnosticLevel.Critical);
             MessageBox.Show("A fatal application error occurred. Restart BRAVIA Theatre PC and try again.",
                 "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         };
@@ -155,13 +143,14 @@ public partial class App : Application
                 args.Handled = true;
                 return;
             }
-            Log($"DISPATCHER UNHANDLED EXCEPTION: {FormatExceptionForLog(args.Exception)}");
+            Log($"DISPATCHER UNHANDLED EXCEPTION: {FormatExceptionForLog(args.Exception)}", DiagnosticLevel.Critical);
             if (_errorDialogs.TryOpen(args.Exception))
             {
                 try
                 {
-                    MessageBox.Show("An application error occurred. Please try the action again.",
-                        "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    // Background messages fail too, so do not assume the user just did something.
+                    MessageBox.Show("BRAVIA Theatre PC ran into an unexpected problem. If it keeps happening, restart the app. Details are in the log, which Settings can open.",
+                        "BRAVIA Theatre PC", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
                 {
@@ -173,7 +162,7 @@ public partial class App : Application
                 Dispatcher.BeginInvoke(ShutdownApp);
         };
 
-        Log("Application starting...");
+        Log("Application starting...", DiagnosticLevel.Info);
 
         base.OnStartup(e);
 
@@ -181,15 +170,16 @@ public partial class App : Application
         _ownsSingleInstanceMutex = createdNew;
         if (!createdNew)
         {
-            Log("Another instance is already running. Signaling Quick Settings flyout.");
-            uint wmShowFlyout = RegisterWindowMessage("BRAVIA_THEATRE_PC_SHOW_FLYOUT");
-            PostMessage(HWND_BROADCAST, wmShowFlyout, IntPtr.Zero, IntPtr.Zero);
+            Log("Another instance is already running. Signaling Quick Settings flyout.", DiagnosticLevel.Info);
+            uint wmShowFlyout = NativeMethods.RegisterWindowMessage("BRAVIA_THEATRE_PC_SHOW_FLYOUT");
+            NativeMethods.PostMessage(HWND_BROADCAST, wmShowFlyout, IntPtr.Zero, IntPtr.Zero);
             Shutdown();
             return;
         }
 
         // Before any window exists: WPF reads the stylus switch when it creates the first one.
         PinNativeLibraries();
+        _ = Task.Run(DeleteStaleBundleExtractions);
         WebViewProfileService.DeleteStaleProfiles(GetAppDataDir());
         try
         {
@@ -222,7 +212,7 @@ public partial class App : Application
                     credentials,
                     cancellationToken,
                     checkpointRotatedRefreshTokenAsync: checkpointRotatedRefreshTokenAsync,
-                    diagnosticLog: Log,
+                    diagnosticLog: LogCredentialDiagnostic,
                     reassociationSelector: reassociationSelector),
             (credentials, cancellationToken) =>
             {
@@ -231,14 +221,14 @@ public partial class App : Application
                     throw new InvalidOperationException(error ?? "Could not save protected Sony credentials.");
                 return Task.CompletedTask;
             })
-        { DiagnosticLog = Log };
+        { DiagnosticLog = LogCredentialDiagnostic };
 
         if (_credentialLifecycle.CurrentCredentials?.IsValid != true)
         {
-            Log("Valid protected credentials were not found. Opening AuthDialog...");
+            Log("Valid protected credentials were not found. Opening AuthDialog...", DiagnosticLevel.Info);
             if (!ShowAuthDialog(restartEngine: false))
             {
-                Log("AuthDialog cancelled. Shutting down.");
+                Log("AuthDialog cancelled. Shutting down.", DiagnosticLevel.Info);
                 Shutdown();
                 return;
             }
@@ -246,13 +236,13 @@ public partial class App : Application
 
         if (_credentialLifecycle.CurrentCredentials?.IsValid != true)
         {
-            Log("No valid credentials after AuthDialog. Shutting down.");
+            Log("No valid credentials after AuthDialog. Shutting down.", DiagnosticLevel.Info);
             MessageBox.Show("Valid Sony credentials are required to run.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown();
             return;
         }
 
-        Log("Credentials loaded successfully.");
+        Log("Credentials loaded successfully.", DiagnosticLevel.Info);
 
         // Initialize System Tray
         var trayIconShown = InitializeTray();
@@ -267,12 +257,26 @@ public partial class App : Application
         var missing = BundledNativeLibraries.Pin();
         if (missing.Count == 0) return;
 
-        Log($"Native libraries could not be loaded: {string.Join(", ", missing)}.", AppLogLevel.Critical);
+        Log($"Native libraries could not be loaded: {string.Join(", ", missing)}.", DiagnosticLevel.Critical);
         if (missing.Contains(BundledNativeLibraries.PenImc))
         {
             // WPF's pen and touch stack cannot start without it, and would throw on every
             // device change once a digitizer appears. Touch still arrives as mouse input.
             AppContext.SetSwitch(BundledNativeLibraries.DisableStylusAndTouchSupportSwitch, true);
+        }
+    }
+
+    private static void DeleteStaleBundleExtractions()
+    {
+        try
+        {
+            var deleted = BundleExtractionCleanup.DeleteStaleFolders();
+            if (deleted > 0)
+                Log($"Removed {deleted} native-library folder(s) that other builds left in the temp directory.", DiagnosticLevel.Info);
+        }
+        catch (Exception error)
+        {
+            Log($"Could not remove old native-library folders: {error.GetType().Name}.", DiagnosticLevel.Info);
         }
     }
 
@@ -302,28 +306,33 @@ public partial class App : Application
 
     private bool InitializeTray()
     {
-        Log("Initializing Native System Tray Icon...");
+        Log("Initializing Native System Tray Icon...", DiagnosticLevel.Verbose);
         _trayIcon = new NativeTrayIcon
         {
-            LogAction = message => Log(message, AppLogLevel.Critical),
+            LogAction = message => Log(message, DiagnosticLevel.Critical),
             ToggleAction = activation =>
             {
-                Log("Tray activated. Toggling flyout...");
+                Log("Tray activated. Toggling flyout...", DiagnosticLevel.Verbose);
                 TogglePrimarySurface(activation);
             },
             ShowAction = () =>
             {
-                Log("Application activation requested. Showing flyout...");
+                Log("Application activation requested. Showing flyout...", DiagnosticLevel.Verbose);
                 ShowPrimarySurface();
             },
             ContextMenuAction = ShowTrayContextMenu,
-            IconRecreatedAction = () => _flyout?.RepositionIfVisible(TryGetTrayAnchor())
+            IconRecreatedAction = () => _flyout?.RepositionIfVisible(TryGetTrayAnchor()),
+            NotificationClickedAction = () =>
+            {
+                Log("Tray notification selected. Showing flyout...", DiagnosticLevel.Verbose);
+                ShowPrimarySurface();
+            }
         };
         var shown = _trayIcon.Show(IconHelper.GetTrayIcon("idle"), "BRAVIA Theatre PC");
         if (shown)
-            Log("Native System Tray Icon shown.");
+            Log("Native System Tray Icon shown.", DiagnosticLevel.Info);
         else
-            Log("Native System Tray Icon failed to initialize.");
+            Log("Native System Tray Icon failed to initialize.", DiagnosticLevel.Critical);
         return shown;
     }
 
@@ -333,7 +342,7 @@ public partial class App : Application
 
         _settings.TrayIconGuidanceShown = true;
         if (!_settings.TrySave(out var saveError))
-            Log(saveError ?? "Could not save the tray icon guidance preference.", AppLogLevel.Info);
+            Log(saveError ?? "Could not save the tray icon guidance preference.", DiagnosticLevel.Info);
 
         var result = MessageBox.Show(
             "Windows controls which app icons remain visible next to the clock. To keep BRAVIA Theatre PC visible, enable it under Other system tray icons, or drag it out of the hidden-icons menu.\n\nOpen Taskbar settings now?",
@@ -447,7 +456,7 @@ public partial class App : Application
         }
         catch (Exception error)
         {
-            Log($"[Credential renewal] Device selection failed; ExceptionType={error.GetType().Name}.");
+            Log($"[Credential renewal] Device selection failed; ExceptionType={error.GetType().Name}.", DiagnosticLevel.Critical);
             if (!_isShuttingDown && !cancellation.IsCancellationRequested)
                 MessageBox.Show("The soundbar could not be reconnected. Please try again.",
                     "Reconnect soundbar", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -504,8 +513,8 @@ public partial class App : Application
         var oldEngine = _engine;
         var generation = InvalidateEngineState(oldEngine);
         ApplyStateToUi(SoundbarState.Disconnected);
-        try { _hotkeyService?.Dispose(); } catch (Exception ex) { Log($"Hotkey cleanup warning: {ex.Message}"); }
-        try { _flyout?.CloseForShutdown(); } catch (Exception ex) { Log($"Flyout cleanup warning: {ex.Message}"); }
+        try { _hotkeyService?.Dispose(); } catch (Exception ex) { Log($"Hotkey cleanup warning: {ex.Message}", DiagnosticLevel.Info); }
+        try { _flyout?.CloseForShutdown(); } catch (Exception ex) { Log($"Flyout cleanup warning: {ex.Message}", DiagnosticLevel.Info); }
         _flyout = null;
         try
         {
@@ -513,7 +522,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Log($"Engine cleanup warning: {ex.Message}");
+            Log($"Engine cleanup warning: {ex.Message}", DiagnosticLevel.Info);
         }
 
         string? host = null;
@@ -522,7 +531,7 @@ public partial class App : Application
             if (ControlEndpoint.TryNormalizeHost(_settings.StaticHost, out var staticHost))
                 host = staticHost;
             else
-                Log("Configured static host is not a valid host name or IP address; using automatic discovery instead.", AppLogLevel.Critical);
+                Log("Configured static host is not a valid host name or IP address; using automatic discovery instead.", DiagnosticLevel.Critical);
         }
         var port = _settings.StaticPort is >= 1 and <= 65535 ? _settings.StaticPort : 55051;
         var newEngine = new BraviaEngine(credentialLifecycle, host, port) { LogAction = Log };
@@ -532,15 +541,14 @@ public partial class App : Application
         _engineStateChangedHandler = state => OnEngineStateChanged(generation, state);
         newEngine.StateChanged += _engineStateChangedHandler;
         newEngine.Start();
-        Log("Engine started and running in system tray.");
+        Log("Engine started and running in system tray.", DiagnosticLevel.Info);
     }
 
     private long InvalidateEngineState(BraviaEngine? engine)
     {
-        var generation = Interlocked.Increment(ref _engineGeneration);
+        var generation = _stateRelay.StartGeneration();
         var handler = _engineStateChangedHandler;
         _engineStateChangedHandler = null;
-        lock (_pendingStateLock) _pendingState = null;
         if (engine != null && handler != null) engine.StateChanged -= handler;
         return generation;
     }
@@ -555,11 +563,11 @@ public partial class App : Application
 
         if (result.Success)
         {
-            Log(result.Message);
+            Log(result.Message, DiagnosticLevel.Info);
             return;
         }
 
-        Log($"Hotkey registration failed: {result.Message}");
+        Log($"Hotkey registration failed: {result.Message}", DiagnosticLevel.Critical);
         if (showUserError)
         {
             var rollback = result.PreviousBindingsRestored ? "\n\nThe previous shortcuts remain active." : "";
@@ -668,54 +676,15 @@ public partial class App : Application
 
     private void OnEngineStateChanged(long generation, SoundbarState state)
     {
-        if (generation != Volatile.Read(ref _engineGeneration) ||
+        if (generation != _stateRelay.Generation ||
             Dispatcher.HasShutdownStarted ||
             Dispatcher.HasShutdownFinished)
         {
             return;
         }
 
-        Log($"State updated: Connected={state.Connected}, Power={state.Power}, Vol={state.Volume}, Codec={state.Codec}, Ch={state.Channel}, Voice={state.VoiceMode}, Inp={state.Function}", AppLogLevel.Verbose);
-        lock (_pendingStateLock)
-        {
-            if (generation != Volatile.Read(ref _engineGeneration)) return;
-            _pendingState = new PendingEngineState(generation, state);
-        }
-        SchedulePendingStateDispatch();
-    }
-
-    private void SchedulePendingStateDispatch()
-    {
-        if (Interlocked.Exchange(ref _stateDispatchPending, 1) != 0) return;
-        try
-        {
-            Dispatcher.BeginInvoke(() =>
-            {
-                PendingEngineState? latest;
-                lock (_pendingStateLock)
-                {
-                    latest = _pendingState;
-                    _pendingState = null;
-                }
-                Interlocked.Exchange(ref _stateDispatchPending, 0);
-                if (latest is { } pending &&
-                    pending.Generation == Volatile.Read(ref _engineGeneration) &&
-                    !Dispatcher.HasShutdownStarted &&
-                    !Dispatcher.HasShutdownFinished)
-                {
-                    ApplyStateToUi(pending.State);
-                }
-
-                lock (_pendingStateLock)
-                {
-                    if (_pendingState != null) SchedulePendingStateDispatch();
-                }
-            });
-        }
-        catch
-        {
-            Interlocked.Exchange(ref _stateDispatchPending, 0);
-        }
+        Log($"State updated: Connected={state.Connected}, Power={state.Power}, Vol={state.Volume}, Codec={state.Codec}, Ch={state.Channel}, Voice={state.VoiceMode}, Inp={state.Function}", DiagnosticLevel.Verbose);
+        _stateRelay.Publish(generation, state);
     }
 
     private void ApplyStateToUi(SoundbarState state)
@@ -727,6 +696,15 @@ public partial class App : Application
             _trayIcon.UpdateIcon(IconHelper.GetTrayIcon(state.CodecBadgeKind), presentation.TrayTooltip);
         }
 
+        // Nobody may open the flyout for days, so say so when the app needs the user, unless
+        // they are already in the dialog that resolves it.
+        if (_attentionNotifier.Update(state) is { } notification &&
+            _authDialog == null && _deviceSelectionDialog == null &&
+            _trayIcon?.ShowNotification(notification.Title, notification.Text) == true)
+        {
+            Log($"Tray notification shown: {notification.Attention}.", DiagnosticLevel.Info);
+        }
+
         _trayMenu?.UpdateState(state);
         _flyout?.UpdateState(state);
     }
@@ -734,14 +712,14 @@ public partial class App : Application
     private void ShutdownApp()
     {
         if (_isShuttingDown) return;
-        Log("Shutting down application.");
+        Log("Shutting down application.", DiagnosticLevel.Info);
         CleanupApp();
         Shutdown();
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
-        Log("Application exited.");
+        Log("Application exited.", DiagnosticLevel.Info);
         CleanupApp();
         base.OnExit(e);
     }
@@ -755,7 +733,7 @@ public partial class App : Application
         try { _authDialog?.Close(); } catch { }
         try { _settingsWindow?.Close(); } catch { }
         try { _trayMenu?.CloseForShutdown(); } catch { }
-        try { _hotkeyService?.Dispose(); } catch (Exception ex) { Log($"Hotkey cleanup warning: {ex.Message}"); }
+        try { _hotkeyService?.Dispose(); } catch (Exception ex) { Log($"Hotkey cleanup warning: {ex.Message}", DiagnosticLevel.Info); }
         try { InvalidateEngineState(_engine); } catch { }
         try
         {
@@ -763,10 +741,10 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Log($"Engine cleanup warning: {ex.Message}");
+            Log($"Engine cleanup warning: {ex.Message}", DiagnosticLevel.Info);
         }
-        try { _flyout?.CloseForShutdown(); } catch (Exception ex) { Log($"Flyout cleanup warning: {ex.Message}"); }
-        try { _trayIcon?.Dispose(); } catch (Exception ex) { Log($"Tray cleanup warning: {ex.Message}"); }
+        try { _flyout?.CloseForShutdown(); } catch (Exception ex) { Log($"Flyout cleanup warning: {ex.Message}", DiagnosticLevel.Info); }
+        try { _trayIcon?.Dispose(); } catch (Exception ex) { Log($"Tray cleanup warning: {ex.Message}", DiagnosticLevel.Info); }
         try { IconHelper.DisposeCachedIcons(); } catch { }
         try
         {

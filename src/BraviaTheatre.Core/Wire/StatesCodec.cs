@@ -42,47 +42,6 @@ public static class StatesCodec
         return result;
     }
 
-    public static byte[] BuildGetStatesRequest(
-        string hmacKeyHex,
-        IEnumerable<string> fieldPaths,
-        byte[] sessionRandom,
-        string sessionId)
-    {
-        var pathList = new List<string>(fieldPaths);
-        if (pathList.Count == 1)
-            return BuildSingleGetStatesRequest(hmacKeyHex, pathList[0], sessionRandom, sessionId);
-
-        using var msInnerParts = new MemoryStream();
-        foreach (var path in pathList)
-        {
-            var pathBytes = Encoding.UTF8.GetBytes(path);
-            var field = ProtobufWireCodec.LengthDelimited(1, pathBytes);
-            msInnerParts.Write(field, 0, field.Length);
-        }
-
-        var nestedField = ProtobufWireCodec.LengthDelimited(1, msInnerParts.ToArray());
-        var sessionIdBytes = Encoding.UTF8.GetBytes(sessionId);
-        using var msEmbedded = new MemoryStream();
-        var fRand = ProtobufWireCodec.LengthDelimited(1, sessionRandom);
-        msEmbedded.Write(fRand, 0, fRand.Length);
-        var fId = ProtobufWireCodec.LengthDelimited(3, sessionIdBytes);
-        msEmbedded.Write(fId, 0, fId.Length);
-        var embeddedField = ProtobufWireCodec.LengthDelimited(2, msEmbedded.ToArray());
-
-        var field1Content = new byte[nestedField.Length + embeddedField.Length];
-        Buffer.BlockCopy(nestedField, 0, field1Content, 0, nestedField.Length);
-        Buffer.BlockCopy(embeddedField, 0, field1Content, nestedField.Length, embeddedField.Length);
-
-        var authToken = PacketSigner.ComputeHmac(hmacKeyHex, field1Content);
-        var fieldListBytes = ProtobufWireCodec.LengthDelimited(1, field1Content);
-        var authBytes = ProtobufWireCodec.LengthDelimited(2, authToken);
-
-        var result = new byte[fieldListBytes.Length + authBytes.Length];
-        Buffer.BlockCopy(fieldListBytes, 0, result, 0, fieldListBytes.Length);
-        Buffer.BlockCopy(authBytes, 0, result, fieldListBytes.Length, authBytes.Length);
-        return result;
-    }
-
     public static (byte[]? sessionRandom, byte[]? authToken, string? sessionId) ExtractSessionTokens(byte[] raw)
     {
         ArgumentNullException.ThrowIfNull(raw);

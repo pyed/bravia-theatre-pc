@@ -2,14 +2,21 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using BraviaTheatre.Core.Auth;
 
 namespace BraviaTheatre.Core.Engine;
 
 internal interface IBraviaClient : IDisposable
 {
-    Action<string>? LogAction { get; set; }
+    Action<string, DiagnosticLevel>? LogAction { get; set; }
 
     Task InitializeSessionAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Repeats the handshake on the open connection with renewed credentials, which every later
+    /// call then signs with. If the handshake fails, the client keeps its previous credentials.
+    /// </summary>
+    Task ReauthenticateAsync(SonyCredentials credentials, CancellationToken ct = default);
 
     Task<Dictionary<string, object?>> GetInitialStatesAsync(
         IEnumerable<string> paths,

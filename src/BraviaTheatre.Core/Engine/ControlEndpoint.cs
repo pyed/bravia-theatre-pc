@@ -42,9 +42,11 @@ public static class ControlEndpoint
         // digits and dots is meant as an IPv4 address, so it must be a full dotted quad.
         if (IsDigitsAndDots(candidate))
         {
-            if (!IsDottedQuad(candidate))
+            // Build the address from the decimal octets. IPAddress.Parse reads a leading zero
+            // as octal, so "192.168.1.010" became 192.168.1.8 instead of the .10 that was meant.
+            if (!TryParseDottedQuad(candidate, out var octets))
                 return false;
-            host = IPAddress.Parse(candidate).ToString();
+            host = new IPAddress(octets).ToString();
             return true;
         }
 
@@ -80,15 +82,17 @@ public static class ControlEndpoint
         return true;
     }
 
-    private static bool IsDottedQuad(string value)
+    private static bool TryParseDottedQuad(string value, out byte[] octets)
     {
+        octets = new byte[4];
         var parts = value.Split('.');
         if (parts.Length != 4) return false;
 
-        foreach (var part in parts)
+        for (var index = 0; index < parts.Length; index++)
         {
+            var part = parts[index];
             if (part.Length is 0 or > 3
-                || !byte.TryParse(part, NumberStyles.None, CultureInfo.InvariantCulture, out _))
+                || !byte.TryParse(part, NumberStyles.None, CultureInfo.InvariantCulture, out octets[index]))
             {
                 return false;
             }

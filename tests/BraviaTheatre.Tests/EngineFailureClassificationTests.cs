@@ -45,7 +45,7 @@ public sealed class EngineFailureClassificationTests
             },
             static (_, ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct));
 
-        engine.LogAction = message =>
+        engine.LogAction = (message, _) =>
         {
             logs.Enqueue(message);
             if (message.Contains("Classification=protocol_failure", StringComparison.Ordinal))

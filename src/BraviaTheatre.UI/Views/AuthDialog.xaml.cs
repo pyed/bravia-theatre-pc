@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using BraviaTheatre.Core;
 using BraviaTheatre.Core.Auth;
 using BraviaTheatre.UI.Services;
 using Microsoft.Web.WebView2.Core;
@@ -20,6 +21,8 @@ public partial class AuthDialog : Window
     private bool _isProcessing = false;
     private bool _isClosed;
     private string? _webViewSessionDirectory;
+    private CoreWebView2Environment? _webViewEnvironment;
+    private readonly List<Window> _popups = new();
 
     public AuthDialog(SonyCredentialLifecycle credentialLifecycle)
     {
@@ -56,6 +59,7 @@ public partial class AuthDialog : Window
             _webViewSessionDirectory = WebViewProfileService.PrepareSessionDirectory(App.GetAppDataDir());
             var env = await CoreWebView2Environment.CreateAsync(userDataFolder: _webViewSessionDirectory);
             cancellationToken.ThrowIfCancellationRequested();
+            _webViewEnvironment = env;
             await AuthWebView.EnsureCoreWebView2Async(env);
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -67,6 +71,8 @@ public partial class AuthDialog : Window
 
             // Intercept the custom scheme redirect callback
             AuthWebView.CoreWebView2.NavigationStarting += CoreWebView2_NavigationStarting;
+            AuthWebView.CoreWebView2.NewWindowRequested += CoreWebView2_NewWindowRequested;
+            AuthWebView.CoreWebView2.ProcessFailed += CoreWebView2_ProcessFailed;
             AuthWebView.NavigationCompleted += AuthWebView_NavigationCompleted;
 
             AuthWebView.Source = new Uri(_authUrl!);
@@ -77,7 +83,7 @@ public partial class AuthDialog : Window
         }
         catch (Exception ex)
         {
-            App.Log($"WebView2 initialization failed ({ex.GetType().Name}); falling back to manual mode.");
+            App.Log($"WebView2 initialization failed ({ex.GetType().Name}); falling back to manual mode.", DiagnosticLevel.Critical);
             SwitchToManualMode();
         }
     }
@@ -121,7 +127,7 @@ public partial class AuthDialog : Window
                     installResult.Diagnostic ?? "Could not save protected Sony credentials.");
             }
 
-            App.Log("OAuth flow and local key exchange completed successfully.");
+            App.Log("OAuth flow and local key exchange completed successfully.", DiagnosticLevel.Info);
             if (_isClosed) return;
             DialogResult = true;
             Close();
@@ -221,10 +227,14 @@ public partial class AuthDialog : Window
         int? browserProcessId = null;
         try
         {
+            foreach (var popup in _popups.ToArray())
+                popup.Close();
             if (AuthWebView.CoreWebView2 != null)
             {
                 browserProcessId = checked((int)AuthWebView.CoreWebView2.BrowserProcessId);
                 AuthWebView.CoreWebView2.NavigationStarting -= CoreWebView2_NavigationStarting;
+                AuthWebView.CoreWebView2.NewWindowRequested -= CoreWebView2_NewWindowRequested;
+                AuthWebView.CoreWebView2.ProcessFailed -= CoreWebView2_ProcessFailed;
             }
             AuthWebView.NavigationCompleted -= AuthWebView_NavigationCompleted;
             AuthWebView.Dispose();
@@ -246,11 +256,14 @@ public partial class AuthDialog : Window
         }
         catch (Exception ex)
         {
-            App.Log($"WebView2 profile cleanup warning ({ex.GetType().Name}).", App.AppLogLevel.Info);
+            App.Log($"WebView2 profile cleanup warning ({ex.GetType().Name}).", DiagnosticLevel.Info);
         }
     }
 
-    private async void CoreWebView2_NavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs args)
+    private async void CoreWebView2_NavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs args) =>
+        await InterceptCallbackAsync(args, popup: null);
+
+    private async Task InterceptCallbackAsync(CoreWebView2NavigationStartingEventArgs args, Window? popup)
     {
         if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) ||
             !uri.Scheme.Equals("ssh-app", StringComparison.OrdinalIgnoreCase))
@@ -259,6 +272,7 @@ public partial class AuthDialog : Window
         }
 
         args.Cancel = true;
+        popup?.Close();
         if (!uri.Host.Equals("signin", StringComparison.OrdinalIgnoreCase))
         {
             MessageBox.Show(this, "Sony returned an unexpected callback address. Start sign-in again.",
@@ -267,6 +281,67 @@ public partial class AuthDialog : Window
         }
 
         await ProcessAuthCallbackAsync(args.Uri);
+    }
+
+    private async void CoreWebView2_NewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs args)
+    {
+        // Left to WebView2, a popup (social sign-in, for example) opens in a window this dialog
+        // does not watch, so a callback that lands there is never seen and sign-in hangs. Host
+        // it here and intercept the callback the same way. Blocked if it cannot be hosted.
+        args.Handled = true;
+        if (_isClosed || _webViewEnvironment is not { } environment) return;
+
+        var deferral = args.GetDeferral();
+        try
+        {
+            var view = new Microsoft.Web.WebView2.Wpf.WebView2();
+            var popup = new Window
+            {
+                Owner = this,
+                Title = Title,
+                Width = 520,
+                Height = 680,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ShowInTaskbar = false,
+                Content = view
+            };
+            popup.Closed += (_, _) =>
+            {
+                _popups.Remove(popup);
+                view.Dispose();
+            };
+            _popups.Add(popup);
+            popup.Show();
+
+            await view.EnsureCoreWebView2Async(environment);
+            view.CoreWebView2.NavigationStarting += async (_, navigation) => await InterceptCallbackAsync(navigation, popup);
+            view.CoreWebView2.WindowCloseRequested += (_, _) => popup.Close();
+            args.NewWindow = view.CoreWebView2;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Sign-in popup could not be opened ({ex.GetType().Name}).", DiagnosticLevel.Critical);
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    private void CoreWebView2_ProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs args)
+    {
+        if (args.ProcessFailedKind is not (CoreWebView2ProcessFailedKind.BrowserProcessExited
+            or CoreWebView2ProcessFailedKind.RenderProcessExited
+            or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive))
+        {
+            return;
+        }
+
+        // A crashed or hung page leaves the dialog blank; manual sign-in still works.
+        App.Log($"WebView2 sign-in stopped working ({args.ProcessFailedKind}); switching to manual mode.", DiagnosticLevel.Critical);
+        if (_isClosed || _isProcessing) return;
+        OverlayProgress.Visibility = Visibility.Collapsed;
+        SwitchToManualMode();
     }
 
     private void AuthWebView_NavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs args)

@@ -252,7 +252,7 @@ public sealed class MdnsDiscoveryTests
         Assert.False(MdnsDiscovery.IsFingerprintEvidenceStatus(Grpc.Core.StatusCode.Unavailable));
     }
 
-    private static byte[] BuildMdnsResponse(
+    internal static byte[] BuildMdnsResponse(
         string serviceType,
         string instanceLabel,
         string target,

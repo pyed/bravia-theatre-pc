@@ -15,15 +15,12 @@ using BraviaTheatre.Core.Engine;
 using BraviaTheatre.Core.Models;
 using BraviaTheatre.UI.Models;
 using BraviaTheatre.UI.Services;
+using static BraviaTheatre.UI.Services.NativeMethods;
 
 namespace BraviaTheatre.UI.Views;
 
 public partial class FlyoutWindow : Window
 {
-    private const uint MonitorDefaultToNearest = 0x00000002;
-    private const uint SwpNoSize = 0x0001;
-    private const uint SwpNoZOrder = 0x0004;
-    private const uint SwpNoActivate = 0x0010;
 
     private readonly BraviaEngine _engine;
     private readonly Action _onAuthenticate;
@@ -48,59 +45,6 @@ public partial class FlyoutWindow : Window
         "M2,8v8h4l6,5V3L6,8H2z M16.5,8c.9,1.1 1.5,2.5 1.5,4s-.6,2.9-1.5,4l-1.5-1.5c.6-.7 1-1.6 1-2.5s-.4-1.8-1-2.5L16.5,8z M19,5.5c1.9,1.7 3,4 3,6.5s-1.1,4.8-3,6.5l-1.5-1.5c1.5-1.3 2.5-3.1 2.5-5s-1-3.7-2.5-5L19,5.5z");
     private static readonly Geometry SpeakerMutedGeometry = Geometry.Parse(
         "M2,8v8h4l6,5V3L6,8H2z M15.4,9.4L18,12l-2.6,2.6 1.4,1.4 2.6-2.6 2.6,2.6 1.4-1.4L20.8,12l2.6-2.6-1.4-1.4-2.6,2.6-2.6-2.6-1.4,1.4z");
-
-    [DllImport("user32.dll")]
-    private static extern bool GetCursorPos(out PointNative point);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr MonitorFromPoint(PointNative point, uint flags);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo monitorInfo);
-
-    [DllImport("user32.dll")]
-    private static extern bool GetWindowRect(IntPtr hwnd, out RectNative rect);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetWindowPos(
-        IntPtr hwnd,
-        IntPtr insertAfter,
-        int x,
-        int y,
-        int width,
-        int height,
-        uint flags);
-
-    [DllImport("user32.dll")]
-    private static extern uint GetDpiForWindow(IntPtr hwnd);
-
-    [DllImport("user32.dll")]
-    private static extern int GetMessageTime();
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct PointNative
-    {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RectNative
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-    private struct MonitorInfo
-    {
-        public int Size;
-        public RectNative Monitor;
-        public RectNative WorkArea;
-        public uint Flags;
-    }
 
     public FlyoutWindow(BraviaEngine engine, AppSettings settings, Action onAuthenticate, Action onChooseSoundbar)
     {
@@ -139,16 +83,6 @@ public partial class FlyoutWindow : Window
             Dispatcher.BeginInvoke(RepositionIfVisible, DispatcherPriority.Loaded);
     }
 
-    public void ToggleFlyout()
-    {
-        var transition = _presentation.ToggleFromTray(sameDeactivationInteraction: false);
-        if (!transition.Exists) return;
-        if (transition.Target == FlyoutPresentationState.Opening)
-            BeginOpen(transition, null);
-        else
-            BeginClose(transition);
-    }
-
     internal void ToggleFromTray(TrayActivation activation, PixelRect? trayAnchor)
     {
         var sameDeactivationInteraction = TrayInteractionCorrelator.IsSameInteraction(
@@ -165,8 +99,6 @@ public partial class FlyoutWindow : Window
         else
             BeginClose(transition);
     }
-
-    public void ShowFlyout() => ShowFlyout(null);
 
     internal void ShowFlyout(PixelRect? trayAnchor)
     {
@@ -194,8 +126,6 @@ public partial class FlyoutWindow : Window
         _placement = ResolvePlacement(_trayAnchor);
         SetWindowPosition(_placement.Bounds.Left, _placement.Bounds.Top);
     }
-
-    public void PositionNearTray() => RepositionIfVisible();
 
     internal void ResolveTrayInteraction() => _presentation.ResolveTrayInteraction();
 

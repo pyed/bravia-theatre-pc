@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -37,6 +38,50 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         "playback_control.audio_channel"
     };
 
+    // Codec and channel are read from either path; a codec of "no audio" clears the channel too.
+    private static readonly string[] CodecPaths =
+        ["audio_output.stream_info.audio_format", "playback_control.audio_format"];
+    private static readonly string[] ChannelPaths =
+        ["audio_output.stream_info.channel_info", "playback_control.audio_channel"];
+
+    /// <summary>A state field, the paths that report it, and how a reported value is applied.</summary>
+    /// <param name="Apply">Returns null when the value cannot be used, leaving the field as it was.</param>
+    private sealed record StateField(string Name, string[] Paths, Func<SoundbarState, object, SoundbarState?> Apply);
+
+    // Snapshots and live notifications both read fields through this table, so a path or a
+    // parsing rule cannot differ between the two (they had: only notifications knew
+    // playback_control.power).
+    private static readonly StateField[] StateFields =
+    [
+        new(nameof(SoundbarState.Power), ["power", "playback_control.power"],
+            (state, value) => state with { Power = ParseBoolean(value) }),
+        new(nameof(SoundbarState.Volume), ["volume"],
+            (state, value) => int.TryParse(value.ToString(), out var volume) ? state with { Volume = volume } : null),
+        new(nameof(SoundbarState.Mute), ["mute"],
+            (state, value) => state with { Mute = ParseBoolean(value) }),
+        new(nameof(SoundbarState.NightMode), ["sound_setting.night_mode"],
+            (state, value) => state with { NightMode = ParseBoolean(value) }),
+        new(nameof(SoundbarState.SoundField), ["sound_setting.sound_field"],
+            (state, value) => state with { SoundField = ParseBoolean(value) }),
+        new(nameof(SoundbarState.VoiceMode), ["sound_setting.voice_mode"],
+            (state, value) => state with { VoiceMode = ParseBoolean(value) }),
+        new(nameof(SoundbarState.Bass), ["sound_setting.volume.bass"],
+            (state, value) => NormalizeBass(value) is { } bass ? state with { Bass = bass } : null),
+        new(nameof(SoundbarState.RearLevel), ["sound_setting.volume.rear"],
+            (state, value) => int.TryParse(value.ToString(), out var rear) ? state with { RearLevel = rear } : null),
+        new(nameof(SoundbarState.Function), ["playback_control.function"],
+            (state, value) => NormalizeFunction(value) is { } function ? state with { Function = function } : null)
+    ];
+
+    private static readonly Dictionary<string, StateField> StateFieldsByPath = StateFields
+        .SelectMany(field => field.Paths.Select(fieldPath => (fieldPath, field)))
+        .ToDictionary(entry => entry.fieldPath, entry => entry.field, StringComparer.Ordinal);
+
+    internal static IEnumerable<string> MappedPaths =>
+        StateFieldsByPath.Keys.Concat(CodecPaths).Concat(ChannelPaths);
+
+    internal static IReadOnlyList<string> QueriedPaths => MonitoredPaths;
+
     private readonly string? _configuredHost;
     private readonly int _configuredPort;
     private readonly SonyCredentials _credentials;
@@ -45,6 +90,8 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
     private readonly Func<string, int, SonyCredentials, IBraviaClient> _clientFactory;
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
     private readonly TimeProvider _timeProvider;
+    private readonly Func<TimeSpan, CancellationToken, Task<DiscoveredDevice?>> _discoverAsync;
+    private DiscoveredDevice? _lastDiscovered;
 
     private readonly object _lifecycleLock = new();
     private Task? _workerTask;
@@ -80,7 +127,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
     private long _publishedSequence;
 
     public event Action<SoundbarState>? StateChanged;
-    public Action<string>? LogAction { get; set; }
+    public Action<string, DiagnosticLevel>? LogAction { get; set; }
 
     public SoundbarState CurrentState
     {
@@ -113,7 +160,8 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         int port,
         Func<string, int, SonyCredentials, IBraviaClient> clientFactory,
         Func<TimeSpan, CancellationToken, Task> delayAsync,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Func<TimeSpan, CancellationToken, Task<DiscoveredDevice?>>? discoverAsync = null)
     {
         _credentials = credentials;
         _configuredHost = host;
@@ -121,6 +169,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         _clientFactory = clientFactory;
         _delayAsync = delayAsync;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _discoverAsync = discoverAsync ?? MdnsDiscovery.DiscoverAsync;
     }
 
     internal BraviaEngine(
@@ -129,7 +178,8 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         int port,
         Func<string, int, SonyCredentials, IBraviaClient> clientFactory,
         Func<TimeSpan, CancellationToken, Task> delayAsync,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Func<TimeSpan, CancellationToken, Task<DiscoveredDevice?>>? discoverAsync = null)
     {
         ArgumentNullException.ThrowIfNull(credentialLifecycle);
         _credentialLifecycle = credentialLifecycle;
@@ -139,13 +189,14 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         _clientFactory = clientFactory;
         _delayAsync = delayAsync;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _discoverAsync = discoverAsync ?? MdnsDiscovery.DiscoverAsync;
     }
 
-    private void Log(string msg)
+    private void Log(string msg, DiagnosticLevel level)
     {
         try
         {
-            LogAction?.Invoke($"[Engine] {msg}");
+            LogAction?.Invoke($"[Engine] {msg}", level);
         }
         catch
         {
@@ -160,9 +211,30 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         credentials.SessionKeysExpiresAtUtc is { } expiresAt
         && expiresAt <= DateTimeOffset.UtcNow + CredentialRenewalWindow;
 
-    private static string DescribeFailure(Exception error) => error is RpcException rpcError
-        ? $"{nameof(RpcException)} (StatusCode={rpcError.StatusCode})"
-        : error.GetType().Name;
+    internal static string DescribeFailure(Exception error)
+    {
+        if (error is not RpcException rpcError)
+            return error.GetType().Name;
+
+        // A transport failure arrives as StatusCode=Unknown or Unavailable whatever happened.
+        // The types underneath (never their messages, which carry addresses) tell a reset
+        // connection from a stream the device ended or a request that timed out.
+        var causes = new List<string>();
+        for (var cause = rpcError.Status.DebugException; cause != null && causes.Count < 4; cause = cause.InnerException)
+        {
+            causes.Add(cause switch
+            {
+                System.Net.Sockets.SocketException socket => $"{cause.GetType().Name}({socket.SocketErrorCode})",
+                System.Net.Http.HttpRequestException request => $"{cause.GetType().Name}({request.HttpRequestError})",
+                System.Net.Http.HttpProtocolException protocol => $"{cause.GetType().Name}({protocol.ErrorCode})",
+                _ => cause.GetType().Name
+            });
+        }
+
+        return causes.Count == 0
+            ? $"{nameof(RpcException)} (StatusCode={rpcError.StatusCode})"
+            : $"{nameof(RpcException)} (StatusCode={rpcError.StatusCode}, Cause={string.Join(" <- ", causes)})";
+    }
 
     private bool TryUseRenewalResult(
         CredentialRenewalResult renewal,
@@ -183,7 +255,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 : null;
             Log(credentials.SessionKeysExpiresAtUtc is { } expiresAt
                 ? $"Local session credentials renewed; expire at {expiresAt:O}."
-                : "Local session credentials renewed; Sony did not provide an expiry.");
+                : "Local session credentials renewed; Sony did not provide an expiry.", DiagnosticLevel.Info);
             return true;
         }
 
@@ -194,31 +266,31 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 {
                     _authenticationRequiredCredentials = credentials;
                     authRequired = true;
-                    Log("Silent credential renewal unavailable; interactive authentication required.");
+                    Log("Silent credential renewal unavailable; interactive authentication required.", DiagnosticLevel.Critical);
                     return false;
                 }
 
                 authRequired = false;
-                Log("Silent credential renewal unavailable; trying the current local credentials.");
+                Log("Silent credential renewal unavailable; trying the current local credentials.", DiagnosticLevel.Info);
                 return true;
             case CredentialRenewalStatus.AuthenticationRequired:
                 _deviceAssociationRequiredCredentials = null;
                 _authenticationRequiredCredentials = credentials;
                 authRequired = true;
-                Log("Sony authorization was rejected; interactive authentication required.");
+                Log("Sony authorization was rejected; interactive authentication required.", DiagnosticLevel.Critical);
                 return false;
             case CredentialRenewalStatus.DeviceAssociationRequired:
                 _deviceAssociationRequiredCredentials = CurrentCredentials;
                 authRequired = false;
-                Log("Sony soundbar association needs attention; account authorization remains available.");
+                Log("Sony soundbar association needs attention; account authorization remains available.", DiagnosticLevel.Critical);
                 return false;
             case CredentialRenewalStatus.TransientFailure:
                 authRequired = false;
-                Log("Sony credential renewal is temporarily unavailable; retrying without requiring sign-in.");
+                Log("Sony credential renewal is temporarily unavailable; retrying without requiring sign-in.", DiagnosticLevel.Info);
                 return !authenticatedHandshakeRejected;
             default:
                 authRequired = false;
-                Log("Sony credential renewal failed; retrying without requiring sign-in.");
+                Log("Sony credential renewal failed; retrying without requiring sign-in.", DiagnosticLevel.Critical);
                 return !authenticatedHandshakeRejected;
         }
     }
@@ -243,7 +315,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Log($"Engine worker stopped unexpectedly: {DescribeFailure(ex)}");
+            Log($"Engine worker stopped unexpectedly: {DescribeFailure(ex)}", DiagnosticLevel.Critical);
         }
         finally
         {
@@ -266,30 +338,44 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             // A static host skips discovery, so there is no advertised name to show; use
             // the neutral product name rather than assuming a particular model.
             string deviceName = DefaultDeviceName;
+            var reusingLastDiscovery = false;
 
-            if (string.IsNullOrEmpty(host))
+            if (string.IsNullOrEmpty(host) && _lastDiscovered is { } known)
             {
-                Log("Discovering soundbar on local network (mDNS + LAN probe)...");
-                var discovered = await MdnsDiscovery.DiscoverAsync(TimeSpan.FromSeconds(6), _cts.Token);
+                // A reconnect (the daily credential renewal, a network blip) almost always
+                // finds the soundbar where it was, so try it there before multicasting and
+                // probing the subnet again. A failed attempt forgets it.
+                host = known.Host;
+                port = known.Port;
+                deviceName = known.Name;
+                reusingLastDiscovery = true;
+                Log($"Trying the last discovered soundbar at {host}:{port}.", DiagnosticLevel.Info);
+            }
+            else if (string.IsNullOrEmpty(host))
+            {
+                Log("Discovering soundbar on local network (mDNS + LAN probe)...", DiagnosticLevel.Verbose);
+                var discovered = await _discoverAsync(TimeSpan.FromSeconds(6), _cts.Token);
                 if (discovered != null)
                 {
                     host = discovered.Host;
                     port = discovered.Port;
                     deviceName = discovered.Name;
-                    Log($"Discovered soundbar at {host}:{port} ({deviceName})");
+                    Log($"Discovered soundbar at {host}:{port} ({deviceName})", DiagnosticLevel.Info);
                 }
                 else
                 {
-                    Log("Discovery returned no devices. Retrying...");
+                    Log("Discovery returned no devices. Retrying...", DiagnosticLevel.Verbose);
                 }
             }
 
             if (string.IsNullOrEmpty(host))
             {
-                await Task.Delay(TimeSpan.FromSeconds(backoffSec), _cts.Token);
+                await _delayAsync(TimeSpan.FromSeconds(backoffSec), _cts.Token);
                 backoffSec = Math.Min(backoffSec * 2, 60);
                 continue;
             }
+
+            var sessionEstablished = false;
 
             IBraviaClient? client = null;
             using var connectionCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
@@ -335,7 +421,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     && IsNearingExpiry(credentials)
                     && !ReferenceEquals(credentials, _proactiveRenewalSuppressedCredentials))
                 {
-                    Log("[Credential renewal] Trigger=proactive; local credentials nearing expiry; refreshing before authenticated connect.");
+                    Log("[Credential renewal] Trigger=proactive; local credentials nearing expiry; refreshing before authenticated connect.", DiagnosticLevel.Critical);
                     var renewal = await _credentialLifecycle.RefreshAsync(credentials, connectionCts.Token);
                     preflightRenewalStatus = renewal.Status;
                     readyToConnect = TryUseRenewalResult(
@@ -364,7 +450,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                         refreshedForHandshake = !_credentialLifecycle.IsLocalKeyRefreshPending(credentials);
                     }
 
-                    Log($"Connecting gRPC channel to {host}:{port}...");
+                    Log($"Connecting gRPC channel to {host}:{port}...", DiagnosticLevel.Info);
                     client = _clientFactory(host, port, credentials);
                     client.LogAction = Log;
 
@@ -380,16 +466,16 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     {
                         if (!credentials.IsValid)
                         {
-                            Log("Authenticated handshake failed: StatusCode=InvalidArgument, Classification=request_failure (credentials incomplete).");
+                            Log("Authenticated handshake failed: StatusCode=InvalidArgument, Classification=request_failure (credentials incomplete).", DiagnosticLevel.Critical);
                             throw;
                         }
 
-                        Log("Authenticated handshake rejected with InvalidArgument.");
+                        Log("Authenticated handshake rejected with InvalidArgument.", DiagnosticLevel.Critical);
                         if (_credentialLifecycle == null)
                         {
                             _authenticationRequiredCredentials = credentials;
                             authRequired = true;
-                            Log("Silent credential renewal unavailable; interactive authentication required.");
+                            Log("Silent credential renewal unavailable; interactive authentication required.", DiagnosticLevel.Critical);
                             break;
                         }
 
@@ -397,14 +483,14 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                         {
                             _refreshSuppressedCredentials = credentials;
                             authRequired = false;
-                            Log("Authenticated handshake rejected renewed credentials; Classification=request_failure. Further refresh is suppressed for this credential snapshot.");
+                            Log("Authenticated handshake rejected renewed credentials; Classification=request_failure. Further refresh is suppressed for this credential snapshot.", DiagnosticLevel.Critical);
                             break;
                         }
 
                         if (ReferenceEquals(credentials, _refreshSuppressedCredentials))
                         {
                             authRequired = false;
-                            Log("Authenticated handshake still rejects the current renewed credentials; Classification=request_failure. Retrying without another refresh.");
+                            Log("Authenticated handshake still rejects the current renewed credentials; Classification=request_failure. Retrying without another refresh.", DiagnosticLevel.Info);
                             break;
                         }
 
@@ -414,17 +500,17 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                             {
                                 _authenticationRequiredCredentials = credentials;
                                 authRequired = true;
-                                Log("Authenticated handshake rejected and silent renewal is unavailable; interactive authentication required.");
+                                Log("Authenticated handshake rejected and silent renewal is unavailable; interactive authentication required.", DiagnosticLevel.Critical);
                             }
                             else
                             {
                                 authRequired = false;
-                                Log("Authenticated handshake rejected after a failed preflight renewal; retrying later without requiring sign-in.");
+                                Log("Authenticated handshake rejected after a failed preflight renewal; retrying later without requiring sign-in.", DiagnosticLevel.Critical);
                             }
                             break;
                         }
 
-                        Log("[Credential renewal] Trigger=reactive; authenticated handshake rejected; attempting one credential refresh.");
+                        Log("[Credential renewal] Trigger=reactive; authenticated handshake rejected; attempting one credential refresh.", DiagnosticLevel.Critical);
                         var renewal = await _credentialLifecycle.RefreshAsync(credentials, connectionCts.Token);
                         if (!TryUseRenewalResult(
                                 renewal,
@@ -441,7 +527,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                         }
                         catch (Exception disposeError)
                         {
-                            Log($"Rejected client dispose warning: {DescribeFailure(disposeError)}");
+                            Log($"Rejected client dispose warning: {DescribeFailure(disposeError)}", DiagnosticLevel.Info);
                         }
                         client = null;
                     }
@@ -453,7 +539,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                             StatusCode.NotFound or StatusCode.OutOfRange => "request_failure",
                             _ => "unknown"
                         };
-                        Log($"Authenticated handshake failed: StatusCode={ex.StatusCode}, Classification={classification}.");
+                        Log($"Authenticated handshake failed: StatusCode={ex.StatusCode}, Classification={classification}.", DiagnosticLevel.Critical);
                         throw;
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
@@ -463,7 +549,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                         // fault. Classifying it here keeps it out of the generic connection
                         // handler, which reported only an exception type name and gave no
                         // indication that the device, not the network, is at fault.
-                        Log($"Authenticated handshake failed: ExceptionType={DescribeFailure(ex)}, Classification=protocol_failure. Retrying without requiring sign-in.");
+                        Log($"Authenticated handshake failed: ExceptionType={DescribeFailure(ex)}, Classification=protocol_failure. Retrying without requiring sign-in.", DiagnosticLevel.Critical);
                         authRequired = false;
                         break;
                     }
@@ -471,14 +557,17 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
 
                 if (initialized && client != null)
                 {
-                    Log("Full security handshake completed (ConfirmSignin + ConfirmKeys).");
+                    Log("Full security handshake completed (ConfirmSignin + ConfirmKeys).", DiagnosticLevel.Info);
+                    sessionEstablished = true;
+                    if (string.IsNullOrEmpty(_configuredHost))
+                        _lastDiscovered = new DiscoveredDevice(host, port, deviceName);
 
                     ActivateConnection(connectionGeneration, deviceName);
 
                     var notifyStream = new NotifyStreamGate();
                     var notifyTask = NotifyLoopAsync(client, connectionGeneration, notifyStream, connectionCts.Token);
                     connectionTasks.Add(notifyTask);
-                    Log("Live notify stream started.");
+                    Log("Live notify stream started.", DiagnosticLevel.Info);
 
                     var initialSnapshotTask = InitialSnapshotAsync(
                         client,
@@ -516,17 +605,20 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Log($"Connection/Stream error: {DescribeFailure(ex)}");
+                Log($"Connection/Stream error: {DescribeFailure(ex)}", DiagnosticLevel.Critical);
             }
             finally
             {
+                if (reusingLastDiscovery && !sessionEstablished)
+                    _lastDiscovered = null;
+
                 try
                 {
                     connectionCts.Cancel();
                 }
                 catch (Exception ex)
                 {
-                    Log($"Connection cancellation warning: {DescribeFailure(ex)}");
+                    Log($"Connection cancellation warning: {DescribeFailure(ex)}", DiagnosticLevel.Info);
                 }
 
                 SetDisconnectedState(connectionGeneration, authRequired,
@@ -544,7 +636,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     }
                     catch (Exception ex)
                     {
-                        Log($"Client dispose warning: {DescribeFailure(ex)}");
+                        Log($"Client dispose warning: {DescribeFailure(ex)}", DiagnosticLevel.Info);
                     }
                 }
             }
@@ -587,7 +679,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             while (true)
             {
                 var stream = await notifyStream.OpenStreamAsync(ct);
-                if (reopened) Log("Live notify stream started on the renewed session.");
+                if (reopened) Log("Live notify stream started on the renewed session.", DiagnosticLevel.Info);
 
                 try
                 {
@@ -619,9 +711,13 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
         }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled && ct.IsCancellationRequested)
+        {
+            // gRPC reports the engine's own cancellation this way; it is not a failure.
+        }
         catch (Exception ex)
         {
-            Log($"Notify stream ended: {DescribeFailure(ex)}");
+            Log($"Notify stream ended: {DescribeFailure(ex)}", DiagnosticLevel.Critical);
         }
     }
 
@@ -642,12 +738,12 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
 
             if (initialStates.Count == 0)
             {
-                Log("Initial snapshot returned no monitored state.");
+                Log("Initial snapshot returned no monitored state.", DiagnosticLevel.Critical);
                 connectionFailure.TrySetResult(true);
                 return false;
             }
 
-            Log($"Snapshot received ({initialStates.Count} paths). Applying state...");
+            Log($"Snapshot received ({initialStates.Count} paths). Applying state...", DiagnosticLevel.Verbose);
             ApplySnapshotForConnection(initialStates, deviceName, connectionGeneration, baselineRevision.Value);
             return true;
         }
@@ -657,7 +753,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Log($"Initial snapshot warning: {DescribeFailure(ex)}");
+            Log($"Initial snapshot warning: {DescribeFailure(ex)}", DiagnosticLevel.Critical);
             connectionFailure.TrySetResult(true);
             return false;
         }
@@ -676,7 +772,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Log($"Connection worker cleanup warning: {DescribeFailure(ex)}");
+            Log($"Connection worker cleanup warning: {DescribeFailure(ex)}", DiagnosticLevel.Info);
         }
     }
 
@@ -773,7 +869,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 }
                 catch (Exception ex)
                 {
-                    Log($"StateChanged subscriber warning: {DescribeFailure(ex)}");
+                    Log($"StateChanged subscriber warning: {DescribeFailure(ex)}", DiagnosticLevel.Critical);
                 }
             }
         }
@@ -811,12 +907,13 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     var path = cmd.Path;
                     var value = cmd.Value;
 
-                    // Coalesce rapid volume updates from this connection to the latest one.
-                    if (path == "volume")
+                    // A slider drag queues a command per step, each costing two round trips;
+                    // only the last value of a run of the same slider matters.
+                    if (path is "volume" or "sound_setting.volume.rear")
                     {
                         while (_cmdChannel.Reader.TryPeek(out var next)
                             && next.Generation == connectionGeneration
-                            && next.Path == "volume")
+                            && next.Path == path)
                         {
                             _cmdChannel.Reader.TryRead(out cmd);
                             value = cmd.Value;
@@ -843,13 +940,13 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                         }
                         else
                         {
-                            Log($"Command '{path}' has an unsupported value type.");
+                            Log($"Command '{path}' has an unsupported value type.", DiagnosticLevel.Critical);
                             return;
                         }
 
                         if (!succeeded)
                         {
-                            Log($"Command '{path}' was rejected by the device.");
+                            Log($"Command '{path}' was rejected by the device.", DiagnosticLevel.Info);
                             return;
                         }
                     }
@@ -859,7 +956,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     }
                     catch (Exception ex)
                     {
-                        Log($"Command '{path}' exec error: {DescribeFailure(ex)}");
+                        Log($"Command '{path}' exec error: {DescribeFailure(ex)}", DiagnosticLevel.Critical);
                         return;
                     }
                 }
@@ -870,7 +967,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Log($"Command drain error: {DescribeFailure(ex)}");
+                Log($"Command drain error: {DescribeFailure(ex)}", DiagnosticLevel.Critical);
                 return;
             }
         }
@@ -906,13 +1003,26 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     && IsNearingExpiry(credentials)
                     && !ReferenceEquals(credentials, _proactiveRenewalSuppressedCredentials))
                 {
-                    Log("Local credentials nearing expiry; reconnecting for renewal.");
-                    return;
+                    switch (await RenewCredentialsInPlaceAsync(_credentialLifecycle, client, credentials, notifyStream, ct))
+                    {
+                        case InPlaceRenewal.Renewed:
+                            sessionStarted = _timeProvider.GetTimestamp();
+                            break;
+                        case InPlaceRenewal.KeepCurrent:
+                            // As after a failed renewal before connecting: the current keys work
+                            // until they expire, and the device's rejection then starts a reactive
+                            // renewal. Retrying on every poll would only repeat the failure.
+                            suppressCredentialRenewal = true;
+                            break;
+                        default:
+                            Log("Local credentials nearing expiry; reconnecting for renewal.", DiagnosticLevel.Info);
+                            return;
+                    }
                 }
 
                 if (_timeProvider.GetElapsedTime(sessionStarted) >= DeviceSessionRenewalInterval)
                 {
-                    Log("Device session is due for renewal.");
+                    Log("Device session is due for renewal.", DiagnosticLevel.Verbose);
                     await RenewDeviceSessionAsync(client, notifyStream, ct);
                     sessionStarted = _timeProvider.GetTimestamp();
                 }
@@ -927,7 +1037,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 {
                     // Every path was rejected, which means the device ended the session. Renew it
                     // once on the open connection; if that does not restore it, reconnect.
-                    Log("Device rejected every state query; renewing the device session.");
+                    Log("Device rejected every state query; renewing the device session.", DiagnosticLevel.Info);
                     await RenewDeviceSessionAsync(client, notifyStream, ct);
                     sessionStarted = _timeProvider.GetTimestamp();
 
@@ -947,12 +1057,66 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             {
                 break;
             }
+            catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled && ct.IsCancellationRequested)
+            {
+                // gRPC reports the engine's own cancellation this way; it is not a failure.
+                break;
+            }
             catch (Exception ex)
             {
-                Log($"Keepalive poll failed: {DescribeFailure(ex)}");
+                Log($"Keepalive poll failed: {DescribeFailure(ex)}", DiagnosticLevel.Critical);
                 throw;
             }
         }
+    }
+
+    private enum InPlaceRenewal
+    {
+        Renewed,
+        KeepCurrent,
+        Reconnect
+    }
+
+    // Renewing the daily credentials used to end the connection and build a new one, so the
+    // soundbar showed as disconnected once a day. The device accepts a new handshake on the open
+    // connection, as the hourly session renewal relies on, so renew and repeat the handshake
+    // there. Any outcome but a clean success leads to the reconnect path, which handles them all.
+    private async Task<InPlaceRenewal> RenewCredentialsInPlaceAsync(
+        SonyCredentialLifecycle lifecycle,
+        IBraviaClient client,
+        SonyCredentials credentials,
+        NotifyStreamGate notifyStream,
+        CancellationToken ct)
+    {
+        Log("[Credential renewal] Trigger=proactive; local credentials nearing expiry; renewing on the open connection.", DiagnosticLevel.Critical);
+        var renewal = await lifecycle.RefreshAsync(credentials, ct);
+        var renewed = credentials;
+        var authRequired = false;
+
+        // Sign-in or a soundbar choice is needed; ending the connection reports it.
+        if (!TryUseRenewalResult(renewal, ref renewed, ref authRequired, authenticatedHandshakeRejected: false))
+            return InPlaceRenewal.Reconnect;
+        if (renewal.Status != CredentialRenewalStatus.Succeeded || lifecycle.IsLocalKeyRefreshPending(renewed))
+            return InPlaceRenewal.KeepCurrent;
+
+        // The notification stream belongs to the old session, as in a device-session renewal.
+        notifyStream.BeginRenewal();
+        try
+        {
+            await client.ReauthenticateAsync(renewed, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            Log($"[Credential renewal] The handshake with renewed credentials failed on the open connection ({DescribeFailure(ex)}); reconnecting with them.", DiagnosticLevel.Critical);
+            return InPlaceRenewal.Reconnect;
+        }
+        finally
+        {
+            notifyStream.EndRenewal();
+        }
+
+        Log("[Credential renewal] Handshake completed with the renewed credentials on the open connection.", DiagnosticLevel.Critical);
+        return InPlaceRenewal.Renewed;
     }
 
     private async Task RenewDeviceSessionAsync(
@@ -972,7 +1136,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             notifyStream.EndRenewal();
         }
 
-        Log("Device session renewed; handshake completed on the open connection.");
+        Log("Device session renewed; handshake completed on the open connection.", DiagnosticLevel.Info);
     }
 
     internal void ApplySnapshot(Dictionary<string, object?> snapshot, string deviceName) =>
@@ -1001,109 +1165,30 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 return;
 
             var cur = _currentState;
-            bool power = cur.Power;
-            int volume = cur.Volume;
-            bool mute = cur.Mute;
-            bool soundField = cur.SoundField;
-            bool nightMode = cur.NightMode;
-            bool voiceMode = cur.VoiceMode;
-            string bass = cur.Bass;
-            int rearLevel = cur.RearLevel;
-            string function = cur.Function;
-            string? codec = cur.Codec;
-            string? channel = cur.Channel;
+            var next = cur with { Connected = true, DeviceName = deviceName };
             var appliedFields = new List<string>();
 
             bool CanApply(string field) => baselineRevision == long.MaxValue
                 || !_fieldRevisions.TryGetValue(field, out var revision)
                 || revision <= baselineRevision;
 
-            if (snapshot.TryGetValue("power", out var powerValue)
-                && powerValue != null
-                && CanApply(nameof(SoundbarState.Power)))
+            foreach (var field in StateFields)
             {
-                power = ParseBoolean(powerValue);
-                appliedFields.Add(nameof(SoundbarState.Power));
-            }
-
-            if (snapshot.TryGetValue("volume", out var volumeValue)
-                && volumeValue != null
-                && int.TryParse(volumeValue.ToString(), out var parsedVolume)
-                && CanApply(nameof(SoundbarState.Volume)))
-            {
-                volume = parsedVolume;
-                appliedFields.Add(nameof(SoundbarState.Volume));
-            }
-
-            if (snapshot.TryGetValue("mute", out var muteValue)
-                && muteValue != null
-                && CanApply(nameof(SoundbarState.Mute)))
-            {
-                mute = ParseBoolean(muteValue);
-                appliedFields.Add(nameof(SoundbarState.Mute));
-            }
-
-            if (snapshot.TryGetValue("sound_setting.night_mode", out var nightValue)
-                && nightValue != null
-                && CanApply(nameof(SoundbarState.NightMode)))
-            {
-                nightMode = ParseBoolean(nightValue);
-                appliedFields.Add(nameof(SoundbarState.NightMode));
-            }
-
-            if (snapshot.TryGetValue("sound_setting.sound_field", out var fieldValue)
-                && fieldValue != null
-                && CanApply(nameof(SoundbarState.SoundField)))
-            {
-                soundField = ParseBoolean(fieldValue);
-                appliedFields.Add(nameof(SoundbarState.SoundField));
-            }
-
-            if (snapshot.TryGetValue("sound_setting.voice_mode", out var voiceValue)
-                && voiceValue != null
-                && CanApply(nameof(SoundbarState.VoiceMode)))
-            {
-                voiceMode = ParseBoolean(voiceValue);
-                appliedFields.Add(nameof(SoundbarState.VoiceMode));
-            }
-
-            if (snapshot.TryGetValue("sound_setting.volume.bass", out var bassValue)
-                && bassValue != null
-                && CanApply(nameof(SoundbarState.Bass)))
-            {
-                var normalizedBass = bassValue.ToString()?.Trim().ToLowerInvariant();
-                if (normalizedBass is "min" or "mid" or "max")
+                if (!TryGetFirst(snapshot, field.Paths, out var value)
+                    || value is null
+                    || !CanApply(field.Name)
+                    || field.Apply(next, value) is not { } applied)
                 {
-                    bass = normalizedBass;
-                    appliedFields.Add(nameof(SoundbarState.Bass));
+                    continue;
                 }
+
+                next = applied;
+                appliedFields.Add(field.Name);
             }
 
-            if (snapshot.TryGetValue("sound_setting.volume.rear", out var rearValue)
-                && rearValue != null
-                && int.TryParse(rearValue.ToString(), out var parsedRear)
-                && CanApply(nameof(SoundbarState.RearLevel)))
-            {
-                rearLevel = parsedRear;
-                appliedFields.Add(nameof(SoundbarState.RearLevel));
-            }
-
-            if (snapshot.TryGetValue("playback_control.function", out var functionValue)
-                && functionValue != null
-                && CanApply(nameof(SoundbarState.Function)))
-            {
-                var normalizedFunction = functionValue.ToString()?.Trim();
-                if (!string.IsNullOrEmpty(normalizedFunction)
-                    && !normalizedFunction.Equals("unknown", StringComparison.OrdinalIgnoreCase)
-                    && !normalizedFunction.Equals("none", StringComparison.OrdinalIgnoreCase))
-                {
-                    function = normalizedFunction;
-                    appliedFields.Add(nameof(SoundbarState.Function));
-                }
-            }
-
-            bool codecPresent = snapshot.TryGetValue("audio_output.stream_info.audio_format", out var codecValue)
-                || snapshot.TryGetValue("playback_control.audio_format", out codecValue);
+            var codec = next.Codec;
+            var channel = next.Channel;
+            bool codecPresent = TryGetFirst(snapshot, CodecPaths, out var codecValue);
             bool noAudioApplied = false;
 
             if (codecPresent && CanApply(nameof(SoundbarState.Codec)))
@@ -1124,8 +1209,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 }
             }
 
-            bool channelPresent = snapshot.TryGetValue("audio_output.stream_info.channel_info", out var channelValue)
-                || snapshot.TryGetValue("playback_control.audio_channel", out channelValue);
+            bool channelPresent = TryGetFirst(snapshot, ChannelPaths, out var channelValue);
 
             if (channelPresent && !noAudioApplied && CanApply(nameof(SoundbarState.Channel)))
             {
@@ -1135,22 +1219,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
 
             MarkFieldsLocked(appliedFields);
 
-            var next = cur with
-            {
-                Connected = true,
-                DeviceName = deviceName,
-                Power = power,
-                Volume = volume,
-                Mute = mute,
-                SoundField = soundField,
-                NightMode = nightMode,
-                VoiceMode = voiceMode,
-                Bass = bass,
-                RearLevel = rearLevel,
-                Function = function,
-                Codec = codec,
-                Channel = channel
-            };
+            next = next with { Codec = codec, Channel = channel };
 
             if (next != cur)
             {
@@ -1184,7 +1253,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             var next = cur;
             var updatedFields = new List<string>();
 
-            if (path is "playback_control.audio_format" or "audio_output.stream_info.audio_format")
+            if (CodecPaths.Contains(path))
             {
                 var codec = NormalizeAudioValue(value);
                 next = codec == null
@@ -1193,67 +1262,17 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 updatedFields.Add(nameof(SoundbarState.Codec));
                 if (codec == null) updatedFields.Add(nameof(SoundbarState.Channel));
             }
-            else if (path is "playback_control.audio_channel" or "audio_output.stream_info.channel_info")
+            else if (ChannelPaths.Contains(path))
             {
                 next = cur with { Channel = NormalizeAudioValue(value) };
                 updatedFields.Add(nameof(SoundbarState.Channel));
             }
-            else if (value == null)
+            else if (value != null
+                && StateFieldsByPath.TryGetValue(path, out var field)
+                && field.Apply(cur, value) is { } applied)
             {
-                return;
-            }
-            else if (path == "volume" && int.TryParse(value.ToString(), out var volume))
-            {
-                next = cur with { Volume = volume };
-                updatedFields.Add(nameof(SoundbarState.Volume));
-            }
-            else if (path is "power" or "playback_control.power")
-            {
-                next = cur with { Power = ParseBoolean(value) };
-                updatedFields.Add(nameof(SoundbarState.Power));
-            }
-            else if (path == "mute")
-            {
-                next = cur with { Mute = ParseBoolean(value) };
-                updatedFields.Add(nameof(SoundbarState.Mute));
-            }
-            else if (path == "sound_setting.night_mode")
-            {
-                next = cur with { NightMode = ParseBoolean(value) };
-                updatedFields.Add(nameof(SoundbarState.NightMode));
-            }
-            else if (path == "sound_setting.sound_field")
-            {
-                next = cur with { SoundField = ParseBoolean(value) };
-                updatedFields.Add(nameof(SoundbarState.SoundField));
-            }
-            else if (path == "sound_setting.voice_mode")
-            {
-                next = cur with { VoiceMode = ParseBoolean(value) };
-                updatedFields.Add(nameof(SoundbarState.VoiceMode));
-            }
-            else if (path == "sound_setting.volume.bass")
-            {
-                var bass = value.ToString()?.Trim().ToLowerInvariant();
-                if (bass is not ("min" or "mid" or "max")) return;
-                next = cur with { Bass = bass };
-                updatedFields.Add(nameof(SoundbarState.Bass));
-            }
-            else if (path == "sound_setting.volume.rear" && int.TryParse(value.ToString(), out var rear))
-            {
-                next = cur with { RearLevel = rear };
-                updatedFields.Add(nameof(SoundbarState.RearLevel));
-            }
-            else if (path == "playback_control.function")
-            {
-                var function = value.ToString()?.Trim();
-                if (string.IsNullOrEmpty(function)
-                    || function.Equals("unknown", StringComparison.OrdinalIgnoreCase)
-                    || function.Equals("none", StringComparison.OrdinalIgnoreCase))
-                    return;
-
-                next = cur with { Function = function };
-                updatedFields.Add(nameof(SoundbarState.Function));
+                next = applied;
+                updatedFields.Add(field.Name);
             }
             else
             {
@@ -1281,6 +1300,31 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             revision ??= ++_stateRevision;
             _fieldRevisions[field] = revision.Value;
         }
+    }
+
+    private static bool TryGetFirst(Dictionary<string, object?> snapshot, string[] paths, out object? value)
+    {
+        foreach (var candidate in paths)
+        {
+            if (snapshot.TryGetValue(candidate, out value))
+                return true;
+        }
+
+        value = null;
+        return false;
+    }
+
+    private static string? NormalizeBass(object value) =>
+        value.ToString()?.Trim().ToLowerInvariant() is { } bass and ("min" or "mid" or "max") ? bass : null;
+
+    private static string? NormalizeFunction(object value)
+    {
+        var function = value.ToString()?.Trim();
+        return string.IsNullOrEmpty(function)
+            || function.Equals("unknown", StringComparison.OrdinalIgnoreCase)
+            || function.Equals("none", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : function;
     }
 
     private static bool ParseBoolean(object value)
@@ -1473,7 +1517,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Log($"Engine cancellation warning: {DescribeFailure(ex)}");
+            Log($"Engine cancellation warning: {DescribeFailure(ex)}", DiagnosticLevel.Info);
         }
     }
 

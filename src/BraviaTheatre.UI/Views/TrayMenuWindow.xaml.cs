@@ -6,71 +6,18 @@ using System.Windows.Interop;
 using System.Windows.Threading;
 using BraviaTheatre.Core.Models;
 using BraviaTheatre.UI.Services;
+using static BraviaTheatre.UI.Services.NativeMethods;
 
 namespace BraviaTheatre.UI.Views;
 
 public partial class TrayMenuWindow : Window
 {
-    private const uint MonitorDefaultToNearest = 0x00000002;
-    private const uint SwpNoSize = 0x0001;
-    private const uint SwpNoZOrder = 0x0004;
-    private const uint SwpNoActivate = 0x0010;
 
     private readonly Action _openControls;
     private readonly Action _openSettings;
     private readonly Action _openAccount;
     private readonly Action _exit;
     private bool _isDismissing;
-
-    [DllImport("user32.dll")]
-    private static extern bool GetCursorPos(out PointNative point);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr MonitorFromPoint(PointNative point, uint flags);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo monitorInfo);
-
-    [DllImport("user32.dll")]
-    private static extern bool GetWindowRect(IntPtr hwnd, out RectNative rect);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetWindowPos(
-        IntPtr hwnd,
-        IntPtr insertAfter,
-        int x,
-        int y,
-        int width,
-        int height,
-        uint flags);
-
-    [DllImport("user32.dll")]
-    private static extern uint GetDpiForWindow(IntPtr hwnd);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct PointNative
-    {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RectNative
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-    private struct MonitorInfo
-    {
-        public int Size;
-        public RectNative Monitor;
-        public RectNative WorkArea;
-        public uint Flags;
-    }
 
     public TrayMenuWindow(
         Action openControls,
