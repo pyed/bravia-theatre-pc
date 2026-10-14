@@ -18,7 +18,7 @@ Last updated: 2026-10-14
 | v2.2.8 release | Published 2026-10-13 22:56 UTC with all five assets; CI on `main` green |
 | Full audit with prioritized fix proposal | Done 2026-10-14 (section 4) |
 | Overnight work, 2026-10-14 | Released in v2.3.0; open checks in section 7 |
-| v2.3.0 release | Tagged 2026-10-14; Release workflow result recorded below once it finishes |
+| v2.3.0 release | Published 2026-10-14 11:31 (08:31 UTC) with all five assets; Release and CI on `main` green |
 
 Released as **v2.3.0** on 2026-10-14: one commit on `main` with batches 1 to 3, P4-4 and P4-5 from
 section 4 (details in section 7), tagged `v2.3.0`; the tag push runs the Release workflow. Minor
