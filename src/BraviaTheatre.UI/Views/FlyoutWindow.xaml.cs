@@ -521,7 +521,7 @@ public partial class FlyoutWindow : Window
         MaxWidth = Math.Max(1, fallback.Width - 24);
         MaxHeight = Math.Max(1, fallback.Height - 24);
         UpdateLayout();
-        var width = Math.Max(1, (int)Math.Ceiling(ActualWidth > 0 ? ActualWidth : Width));
+        var width = Math.Max(1, (int)Math.Ceiling(ActualWidth > 0 ? ActualWidth : RootBorder.Width));
         var height = Math.Max(1, (int)Math.Ceiling(ActualHeight > 0 ? ActualHeight : 480));
         var work = new PixelRect((int)fallback.Left, (int)fallback.Top, (int)fallback.Right, (int)fallback.Bottom);
         return FlyoutPlacementCalculator.Calculate(work, work, anchor, width, height, 12);

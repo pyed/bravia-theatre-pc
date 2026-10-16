@@ -16,11 +16,14 @@ Last updated: 2026-10-14
 | Soundbar connection drops every hour | Fixed in v2.2.8; verified on the reporter's soundbar (section 3) |
 | Build on the reporter's PC | Framework-dependent build with the section 8 fix (reports 2.3.0) since 2026-10-14 16:14 |
 | Framework-dependent download never starts | Fixed in v2.3.2 (section 8) |
+| Soundbar unreachable since 2026-10-14 afternoon | Soundbar-side, open; reporter to check firmware and setup (section 9) |
+| Flyout three times too wide after a display scale change; tray menu dead after Alt+F4 | Fixed in v2.3.3 (section 10) |
 | v2.2.8 release | Published 2026-10-13 22:56 UTC with all five assets; CI on `main` green |
 | Full audit with prioritized fix proposal | Done 2026-10-14 (section 4) |
 | Overnight work, 2026-10-14 | Released in v2.3.0; open checks in section 7 |
 | v2.3.0 release | Published 2026-10-14 11:31 (08:31 UTC) with all five assets; Release and CI on `main` green |
 | v2.3.1 release | Tag only, no release: its Release run failed at the self-contained publish (`NETSDK1094`, section 8) |
+| v2.3.3 release | Tagged 2026-10-16; result recorded once the Release run finishes |
 | v2.3.2 release | Published 2026-10-14 16:46 (13:46 UTC) with all five assets; both executables passed the release run's startup check; CI on `main` green |
 
 Released as **v2.3.2** on 2026-10-14: the framework-dependent download starts again (it never had
@@ -534,7 +537,8 @@ loaded, one extraction folder in `%TEMP%\.net`, 40 MB private bytes at start. Ro
 
 ### Open items for the reporter
 
-1. **Tonight about 00:33**: the first in-place credential renewal on the device (P1-5). Look for
+1. The first in-place credential renewal on the device (P1-5) is still unverified: the app was not
+   connected on the night of 2026-10-14 (section 9). At the next renewal while connected, look for
    `[Credential renewal] Handshake completed with the renewed credentials on the open connection.`
    in the log; the fallback line also recovers, but means the device wants a new connection.
 2. With the display on, compare private bytes against the hardware-rendering figures (P4-4).
@@ -604,3 +608,58 @@ framework-dependent bundle, which went into v2.3.1. `DOTNET_ReadyToRunExcludeLis
   runs on the installed 10.0.12. It had not connected by 16:40: the soundbar answered ping but
   refused TCP 55051 (its control service was not listening; it accepted connections in standby that
   morning). The app keeps retrying.
+
+## 9. Soundbar control service down (open, not an app fault)
+
+From 2026-10-14 16:15 the app could not reach the soundbar, and it still could not on 2026-10-15
+at 14:00. The reporter suspected a forced re-sign-in; there was none (credentials untouched since
+the 00:38 renewal, no sign-in state logged, no notification).
+
+- The soundbar stays on the LAN at the same address and MAC and advertises `_airplay._tcp`,
+  `_raop._tcp` and `_spotify-connect._tcp` (as "BRAVIA Theatre Bar 9", host `sonyaudio.local`), but
+  not `_sonysmarthome._tcp`, and TCP 55051 refuses connections. Chromecast (`_googlecast._tcp`) is
+  absent too, so the soundbar's main Sony system services are not running while its streaming
+  module is.
+- A full power cycle (unplugged) changed nothing, and BRAVIA Connect on the reporter's iPhone
+  cannot connect either. Sony's cloud (`v1.api.auth.seeds.services`, `v1.api.iot.seeds.services`)
+  answers from the reporter's network.
+- Not caused by the app: the service was fine at 10:52 with the app connected; between the PC's
+  restart at 11:31 and 16:08 nothing on the PC talked to it, and it was already refusing at 16:15.
+- The app behaves correctly: v2.3.2 stays "Disconnected" and keeps retrying, and reconnects by
+  itself once the service is back.
+- Suggested to the reporter: look for a pending or failed firmware update or a re-setup prompt in
+  BRAVIA Connect or the soundbar's menu, check Network/Bluetooth standby, and as a last resort reset
+  network settings or factory-reset and set the soundbar up again (the app then offers Choose
+  soundbar or sign-in as needed).
+- Idea, not done: tell this state apart in the UI ("soundbar found, control service off") instead of
+  a plain "Disconnected", using the AirPlay/Spotify announcement or a refused 55051 on a known host.
+- Diagnostics used: a small mDNS PTR prober (`_services._dns-sd._udp.local` lists every service
+  type per responder) and a TCP connect to 55051 that distinguishes refused from unanswered.
+
+## 10. Flyout three times too wide after a scale change (fixed in v2.3.3)
+
+On 2026-10-16 the reporter found the flyout spanning most of the screen. Measured: 3,456 px wide
+on a 4K display at 300% (AppliedDPI 288) instead of 1,152 px (384 DIP x 3); the height was right.
+After restarting the app at 300% it was 1,152 px. The display switches between a 1280x720 fallback
+at 100% (TV off) and 4K at 300% (TV on), and since v2.3.0 (P1-2, PerMonitorV2) WPF rescales the
+windows itself. The flyout had `Width="384"` on the window with `SizeToContent="Height"`: the height
+was re-measured from content at the new scale, but the fixed window width kept a rescaled value.
+The reporter remembered me "fiddling with resolution"; I only read it (screenshots), and the scale
+change came from the display.
+
+- Reproduced by sending the hidden flyout `WM_DPICHANGED` for 96 then 288 DPI with matching
+  suggested rectangles: v2.3.2 came back at the wrong width (384 px).
+- Re-applying `Width` on DPI change and before opening fixed the flyout but not reliably (setting an
+  unchanged property does not resize the window). The fix: both windows use
+  `SizeToContent="WidthAndHeight"` with the width (384, 280) on their `RootBorder`, so the width
+  follows the content exactly as the height already did. Same simulation afterwards: flyout
+  1,152 x 1,222 px and tray menu 840 x 660 px before and after.
+- Found on the way: the tray menu accepted `WM_CLOSE` (Alt+F4 while focused, or my test helper)
+  and was destroyed, but `App` reuses the one instance, so every later right-click threw
+  `Show after Close` into the error dialog (four such entries on 2026-10-16 03:47-03:49 came from my
+  helper, and the 1,298 x 546 "menu" I first measured was that dialog). `TrayMenuWindow.OnClosing`
+  now cancels and dismisses unless shutting down, like the flyout.
+- `TrayWindowSizingTests`: both windows size to content with the width on `RootBorder`; the menu
+  survives a close request and opens again (fails without the `OnClosing` change). 513 tests pass.
+- Deployed: a framework-dependent build of this working tree over the v2.3.2 download in
+  `Documents\bin` (reports 2.3.2). Released as v2.3.3 at the reporter's request.

@@ -3,8 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="BRAVIA Theatre PC menu"
         ThemeMode="System"
-        Width="280"
-        SizeToContent="Height"
+        SizeToContent="WidthAndHeight"
         WindowStyle="None"
         AllowsTransparency="False"
         Background="Transparent"
@@ -61,7 +60,9 @@
         </Style>
     </Window.Resources>
 
+    <!-- Width on the content, not the window; see FlyoutWindow. -->
     <Border x:Name="RootBorder"
+            Width="280"
             Background="Transparent"
             BorderBrush="{DynamicResource SurfaceStrokeColorFlyoutBrush}"
             BorderThickness="1"

@@ -3,8 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="BRAVIA Theatre PC"
         ThemeMode="System"
-        Width="384"
-        SizeToContent="Height"
+        SizeToContent="WidthAndHeight"
         WindowStyle="None"
         AllowsTransparency="False"
         Background="Transparent"
@@ -156,7 +155,11 @@
 
     <!-- The root fills the HWND exactly. DWM supplies the native rounded clipping,
          desktop acrylic, and shadow, avoiding the old rectangular outer frame. -->
+    <!-- The width lives on the content, not the window: WPF re-measures content at the new scale,
+         but a fixed window width survived a scale change while the app ran (100% to 300% as the
+         reporter's TV turns on) rescaled, and the flyout came back three times as wide. -->
     <Border x:Name="RootBorder"
+            Width="384"
             Background="Transparent"
             BorderBrush="{DynamicResource SurfaceStrokeColorFlyoutBrush}"
             BorderThickness="1"

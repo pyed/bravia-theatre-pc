@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
@@ -18,6 +19,7 @@ public partial class TrayMenuWindow : Window
     private readonly Action _openAccount;
     private readonly Action _exit;
     private bool _isDismissing;
+    private bool _allowClose;
 
     public TrayMenuWindow(
         Action openControls,
@@ -99,8 +101,23 @@ public partial class TrayMenuWindow : Window
 
     internal void CloseForShutdown()
     {
+        _allowClose = true;
         _isDismissing = true;
         Close();
+    }
+
+    // The window is created once and reused. Alt+F4 while the menu had focus closed it for good,
+    // and every later right-click on the tray icon then threw (Show after Close) into an error
+    // dialog. Only shutdown may close it; anything else dismisses it like a click elsewhere.
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (!_allowClose)
+        {
+            e.Cancel = true;
+            Dismiss();
+        }
+
+        base.OnClosing(e);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
