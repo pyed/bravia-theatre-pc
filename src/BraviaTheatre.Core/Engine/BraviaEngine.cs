@@ -1468,6 +1468,22 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             nameof(SoundbarState.Mute)));
     }
 
+    /// <summary>
+    /// Sets power to a known value. Unlike <see cref="TogglePowerAsync"/> this cannot switch the
+    /// soundbar off when the state is stale, so automation uses it; it sends nothing when the
+    /// soundbar already reports that state.
+    /// </summary>
+    public Task<bool> SetPowerAsync(bool on)
+    {
+        return Task.FromResult(TryQueueCommand(
+            "power",
+            state => state.Power == on
+                ? null
+                : (state with { Power = on, Mute = on ? false : state.Mute }, (object)on),
+            nameof(SoundbarState.Power),
+            nameof(SoundbarState.Mute)));
+    }
+
     private bool TryQueueCommand(
         string path,
         Func<SoundbarState, (SoundbarState State, object Value)?> transition,

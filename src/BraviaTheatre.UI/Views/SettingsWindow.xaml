@@ -328,6 +328,22 @@
                                 </StackPanel>
                             </Border>
 
+                            <TextBlock Text="TV" Style="{StaticResource SectionHeading}"/>
+                            <Border Style="{StaticResource SettingsCard}" Margin="0,0,0,20">
+                                <StackPanel>
+                                    <TextBlock Text="Turn the soundbar on with the TV" Style="{StaticResource RowTitle}"/>
+                                    <TextBlock Text="For Samsung TVs that switch the soundbar off but not back on. Enter the TV's IP address; leave empty to turn this off. Works while this app is running."
+                                               Style="{StaticResource CaptionText}" TextWrapping="Wrap" Margin="0,4,0,12"/>
+                                    <TextBlock Text="Samsung TV IP address or host" Style="{StaticResource CaptionText}" Margin="0,0,0,5"/>
+                                    <TextBox x:Name="TxtTvHost"
+                                             Height="34"
+                                             Padding="8,2"
+                                             VerticalContentAlignment="Center"
+                                             ToolTip="Samsung TV hostname or IP address"
+                                             AutomationProperties.Name="Samsung TV host"/>
+                                </StackPanel>
+                            </Border>
+
                             <TextBlock Text="Sony account" Style="{StaticResource SectionHeading}"/>
                             <Border Style="{StaticResource SettingsCard}">
                                 <DockPanel LastChildFill="True">
