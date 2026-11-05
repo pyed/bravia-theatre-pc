@@ -19,7 +19,7 @@ Last updated: 2026-11-06
 | Soundbar unreachable since 2026-10-14 afternoon | Soundbar-side; reachable again by 2026-10-25, cause unknown (section 9) |
 | Daily credential renewal on the open connection (P1-5) | Verified on the device: every renewal in the logs since 2026-10-27 completed in place (section 7) |
 | Flyout three times too wide after a display scale change; tray menu dead after Alt+F4 | Fixed in v2.3.3 (section 10) |
-| Flyout fully transparent, no edge, after days of sleep and resume | Fixed in `01f7463` on `main` (not pushed or released); deployed 2026-11-06 02:12 (section 11) |
+| Flyout fully transparent, no edge, after days of sleep and resume | Fixed in v2.3.4 (`01f7463`); the same code deployed 2026-11-06 02:12 (section 11) |
 | v2.2.8 release | Published 2026-10-13 22:56 UTC with all five assets; CI on `main` green |
 | Full audit with prioritized fix proposal | Done 2026-10-14 (section 4) |
 | Overnight work, 2026-10-14 | Released in v2.3.0; open checks in section 7 |
@@ -27,6 +27,7 @@ Last updated: 2026-11-06
 | v2.3.1 release | Tag only, no release: its Release run failed at the self-contained publish (`NETSDK1094`, section 8) |
 | v2.3.3 release | Published 2026-10-16 (00:59 UTC) with all five assets; both executables passed the startup check; CI on `main` green |
 | v2.3.2 release | Published 2026-10-14 16:46 (13:46 UTC) with all five assets; both executables passed the release run's startup check; CI on `main` green |
+| v2.3.4 release | Published 2026-11-06 02:26 (2026-11-05 23:26 UTC) with all five assets on the run's second attempt; both executables passed the startup check; CI on `main` green (section 11) |
 
 Released as **v2.3.2** on 2026-10-14: the framework-dependent download starts again (it never had
 since ReadyToRun was enabled), CI restores and publishes exactly as the release does, and both
@@ -546,9 +547,8 @@ loaded, one extraction folder in `%TEMP%\.net`, 40 MB private bytes at start. Ro
 3. P1-2 needs a second monitor with another scale, or a Remote Desktop session, to check placement.
 4. P2-2's notification appears only when sign-in or a soundbar choice is really needed.
 5. P2-9 evidence: a Verbose log over one handshake shows whether ConfirmSignin reports success.
-6. Superseded: `Documents\bin` now runs a newer working-tree build (section 11). Once that fix is
-   released, the release's framework-dependent asset can replace it so the install is an attested
-   build.
+6. Superseded: `Documents\bin` now runs a working-tree build of the v2.3.4 code (section 11). The
+   v2.3.4 framework-dependent asset can replace it so the install is an attested build.
 
 ## 8. Framework-dependent download never started (fixed in v2.3.2)
 
@@ -666,7 +666,7 @@ change came from the display.
   survives a close request and opens again (fails without the `OnClosing` change). 513 tests pass.
 - Deployed: a framework-dependent build of this working tree over the v2.3.2 download in
   `Documents\bin` (reports 2.3.2). Released as v2.3.3 at the reporter's request.
-## 11. Flyout fully transparent, without its edge (fixed in `01f7463`, deployed)
+## 11. Flyout fully transparent, without its edge (fixed in v2.3.4)
 
 ### Symptom
 
@@ -743,3 +743,13 @@ starting.
 
 Side observation, not investigated: the replaced copy had 117 MB private bytes after 2.5 days,
 against about 40 MB at start (section 7).
+
+### Released as v2.3.4
+
+At the reporter's request: `Directory.Build.props` moved to 2.3.4 (`37f258e`), annotated tag
+`v2.3.4`, `main` pushed before the tag. The Release run's first attempt built, tested, smoke-tested
+both executables and attested them, then failed at "Create GitHub release": GitHub's API answered
+500, then 502 twice, and no release or draft was created. Re-running the failed job published the
+release (all five assets, marked Latest) at 2026-11-05 23:26 UTC. CI on `main` passed for
+`37f258e`. The deployed build in `Documents\bin` is the same code but not the release asset; it
+reports `2.3.3+efab28f`.
