@@ -19,7 +19,7 @@ Last updated: 2026-11-06
 | Soundbar unreachable since 2026-10-14 afternoon | Soundbar-side; reachable again by 2026-10-25, cause unknown (section 9) |
 | Daily credential renewal on the open connection (P1-5) | Verified on the device: every renewal in the logs since 2026-10-27 completed in place (section 7) |
 | Flyout three times too wide after a display scale change; tray menu dead after Alt+F4 | Fixed in v2.3.3 (section 10) |
-| Flyout fully transparent, no edge, after days of sleep and resume | Fixed in the working tree and deployed 2026-11-06 02:12; not committed or released (section 11) |
+| Flyout fully transparent, no edge, after days of sleep and resume | Fixed in `01f7463` on `main` (not pushed or released); deployed 2026-11-06 02:12 (section 11) |
 | v2.2.8 release | Published 2026-10-13 22:56 UTC with all five assets; CI on `main` green |
 | Full audit with prioritized fix proposal | Done 2026-10-14 (section 4) |
 | Overnight work, 2026-10-14 | Released in v2.3.0; open checks in section 7 |
@@ -666,7 +666,7 @@ change came from the display.
   survives a close request and opens again (fails without the `OnClosing` change). 513 tests pass.
 - Deployed: a framework-dependent build of this working tree over the v2.3.2 download in
   `Documents\bin` (reports 2.3.2). Released as v2.3.3 at the reporter's request.
-## 11. Flyout fully transparent, without its edge (fixed in the working tree, deployed)
+## 11. Flyout fully transparent, without its edge (fixed in `01f7463`, deployed)
 
 ### Symptom
 
@@ -729,7 +729,8 @@ because on a healthy one it shows no difference.
 
 ### Deployed 2026-11-06 02:12
 
-Framework-dependent publish of the working tree (reports `2.3.3+efab28f`, no references to the
+Framework-dependent publish of the working tree before it was committed as `01f7463` (same code;
+reports `2.3.3+efab28f`, no references to the
 composite ReadyToRun image), SHA-256 `4CFEB17F1C26067BD3CF17C79414028A158530D5F602358242AAD9238AB86687`,
 over `Documents\bin\BraviaTheatrePC.exe`, started with `explorer.exe`. The build it replaced (the
 section 10 build, reports 2.3.2, SHA-256 `A6A38271...C97E3E6A`) is kept as
