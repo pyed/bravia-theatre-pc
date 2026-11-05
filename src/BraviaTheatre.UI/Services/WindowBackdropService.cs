@@ -34,14 +34,20 @@ internal readonly record struct WindowAppearancePlan(
 internal static class WindowBackdropService
 {
     private static readonly ConditionalWeakTable<Window, Action> RefreshActions = new();
+    private static readonly ConditionalWeakTable<Window, StrongBox<int>> AppliedAccentStates = new();
     private const int DwmwaUseImmersiveDarkMode = 20;
     private const int DwmwaWindowCornerPreference = 33;
     private const int DwmwaSystemBackdropType = 38;
     private const int DwmwcpRound = 2;
     private const int WcaAccentPolicy = 19;
-    private const int AccentDisabled = 0;
-    private const int AccentEnableAcrylicBlurBehind = 4;
+    internal const int AccentDisabled = 0;
+    internal const int AccentEnableAcrylicBlurBehind = 4;
     private const int AccentDrawAllBorders = 2;
+
+    private const int WmWindowPosChanging = 0x0046;
+    private const int WmWindowPosChanged = 0x0047;
+    private const uint SwpShowWindow = 0x0040;
+    private const uint SwpHideWindow = 0x0080;
 
     private const int WmSysColorChange = 0x0015;
     private const int WmDisplayChange = 0x007E;
@@ -77,6 +83,18 @@ internal static class WindowBackdropService
         public int SizeOfData;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowPos
+    {
+        public IntPtr Hwnd;
+        public IntPtr HwndInsertAfter;
+        public int X;
+        public int Y;
+        public int Width;
+        public int Height;
+        public uint Flags;
+    }
+
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(
         IntPtr hwnd,
@@ -101,6 +119,17 @@ internal static class WindowBackdropService
         HwndSourceHook? hook = null;
         DispatcherOperation? pendingRefresh = null;
         var resetBackdropOnNextVisibleApply = true;
+        var acrylicAccentInUse = false;
+        var acrylicAccentDarkMode = false;
+        var appliedAccentState = AppliedAccentStates.GetValue(window, static _ => new StrongBox<int>(AccentDisabled));
+
+        int SetAccent(IntPtr handle, bool enabled, bool useDarkMode)
+        {
+            var result = ApplyAccentPolicy(handle, enabled, useDarkMode);
+            if (result > 0)
+                appliedAccentState.Value = enabled ? AccentEnableAcrylicBlurBehind : AccentDisabled;
+            return result;
+        }
 
         void ApplyAppearance()
         {
@@ -146,7 +175,13 @@ internal static class WindowBackdropService
                     DwmwaSystemBackdropType,
                     ref noBackdrop,
                     sizeof(int));
-                accentResult = ApplyAccentPolicy(handle, enabled: true, useDarkMode);
+
+                // The accent is on only while the window is shown; WindowProc turns it on just
+                // before each show and off once the window is hidden. Windows ignores an accent
+                // equal to the one the window already has: once DWM had dropped the flyout's
+                // material (after days of sleep and resume cycles), applying the same accent on
+                // every open left it fully transparent until the accent changed.
+                accentResult = SetAccent(handle, enabled: window.IsVisible, useDarkMode);
 
                 if (accentResult <= 0)
                 {
@@ -162,7 +197,7 @@ internal static class WindowBackdropService
             }
             else
             {
-                _ = ApplyAccentPolicy(handle, enabled: false, useDarkMode);
+                _ = SetAccent(handle, enabled: false, useDarkMode);
 
                 if (plan.BackdropType != DwmSystemBackdropType.Auto)
                 {
@@ -189,6 +224,9 @@ internal static class WindowBackdropService
                         resetBackdropOnNextVisibleApply = false;
                 }
             }
+
+            acrylicAccentInUse = plan.UseAcrylicComposition && accentResult > 0;
+            acrylicAccentDarkMode = useDarkMode;
 
             var requestsBackdrop = accentResult > 0 ||
                 (backdropResult >= 0 &&
@@ -252,6 +290,17 @@ internal static class WindowBackdropService
 
         IntPtr WindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
+            // Switching the accent on before the window appears means no frame is drawn
+            // without its backdrop, and every show is a real change that makes DWM build
+            // the material again.
+            if (acrylicAccentInUse &&
+                message is WmWindowPosChanging or WmWindowPosChanged &&
+                lParam != IntPtr.Zero &&
+                AcrylicAccentForWindowPosition(message, Marshal.PtrToStructure<WindowPos>(lParam).Flags) is { } enable)
+            {
+                _ = SetAccent(hwnd, enable, acrylicAccentDarkMode);
+            }
+
             if (IsAppearanceChangeMessage(message))
             {
                 resetBackdropOnNextVisibleApply = true;
@@ -293,6 +342,7 @@ internal static class WindowBackdropService
             window.ContentRendered -= OnContentRendered;
             window.Closed -= OnClosed;
             RefreshActions.Remove(window);
+            AppliedAccentStates.Remove(window);
         }
 
         window.SourceInitialized += OnSourceInitialized;
@@ -307,6 +357,13 @@ internal static class WindowBackdropService
         if (RefreshActions.TryGetValue(window, out var refresh))
             refresh();
     }
+
+    /// <summary>
+    /// The accent state last applied to the window. Windows does not report the accent back
+    /// (<c>GetWindowCompositionAttribute</c> fails for it), so this is what the service set.
+    /// </summary>
+    internal static int AppliedAccentState(Window window) =>
+        AppliedAccentStates.TryGetValue(window, out var state) ? state.Value : AccentDisabled;
 
     internal static WindowAppearancePlan CreatePlan(
         Version windowsVersion,
@@ -350,6 +407,17 @@ internal static class WindowBackdropService
     internal static int AcrylicTintColor(bool useDarkMode) => useDarkMode
         ? unchecked((int)0x99202020)
         : unchecked((int)0xCCF7F7F7);
+
+    /// <summary>
+    /// Whether a window-position message turns the acrylic accent on (the window is about to be
+    /// shown) or off (it has been hidden); null when the message changes neither.
+    /// </summary>
+    internal static bool? AcrylicAccentForWindowPosition(int message, uint flags) => message switch
+    {
+        WmWindowPosChanging when (flags & SwpShowWindow) != 0 => true,
+        WmWindowPosChanged when (flags & SwpHideWindow) != 0 => false,
+        _ => null
+    };
 
     internal static bool IsAppearanceChangeMessage(int message) =>
         message is WmSysColorChange or WmDisplayChange or WmSettingChange or WmDpiChanged or WmThemeChanged or

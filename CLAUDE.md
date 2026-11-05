@@ -128,6 +128,10 @@ A `v*` tag runs `release.yml`, which derives the version from the tag. Bump `<Ve
   the GPU driver's user-mode stack for good (100+ MB private with NVIDIA) and drew nothing while the
   display was off. DWM still draws the acrylic and Mica backdrops; check them with screenshots over
   a bright, patterned window if you touch `WindowBackdropService`.
+- **Acrylic accent.** Windows ignores an accent policy equal to the one a window already has, and DWM
+  can drop a hidden window's acrylic (the flyout came up fully transparent after days of sleep and
+  resume). The flyout and tray menu therefore turn the accent on just before each show and off once
+  hidden (HANDOFF section 11); re-applying the same accent repairs nothing.
 - **Error dialogs** go through `ErrorDialogGate`: one at a time, and the same failure at most once
   every ten minutes. A failure inside a window-message handler repeats for every message, and a
   modal dialog pumps messages, so ungated dialogs stack.
@@ -141,7 +145,8 @@ A `v*` tag runs `release.yml`, which derives the version from the tag. Bump `<Ve
   notification stream for the renewal and reopens it on the new session. Any failure there falls
   back to a full reconnect. The daily local-credential renewal works the same way: the keepalive
   renews, then `ReauthenticateAsync` repeats the handshake with the new keys on the open connection,
-  and reconnects only if that fails or the user has to act (first device check due 2026-10-15 00:33). Requests carry a rolling 8-byte session random and possibly a new
+  and reconnects only if that fails or the user has to act (verified on the device: every renewal
+  logged from 2026-10-27 on completed in place). Requests carry a rolling 8-byte session random and possibly a new
   session id; `BraviaClient` adopts both.
   Two clients using the same key id at once interfere with each other, so do not run experiments
   against a soundbar while the app is connected to it.

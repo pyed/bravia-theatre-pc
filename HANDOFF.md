@@ -3,7 +3,7 @@
 Living record of work on this repository. Read it first; update it as you go (see
 [CLAUDE.md](CLAUDE.md#keep-handoffmd-current)). Times are the reporter's local time.
 
-Last updated: 2026-10-14
+Last updated: 2026-11-06
 
 ## Status
 
@@ -14,10 +14,12 @@ Last updated: 2026-10-14
 | gRPC connection pool leaked on every reconnect | Fixed in v2.2.8 |
 | Volume slider stops following the soundbar after an interrupted drag | Fixed in v2.2.8 |
 | Soundbar connection drops every hour | Fixed in v2.2.8; verified on the reporter's soundbar (section 3) |
-| Build on the reporter's PC | Framework-dependent build with the section 8 fix (reports 2.3.0) since 2026-10-14 16:14 |
+| Build on the reporter's PC | Framework-dependent build of the section 11 working tree (reports 2.3.3) since 2026-11-06 02:12 |
 | Framework-dependent download never starts | Fixed in v2.3.2 (section 8) |
-| Soundbar unreachable since 2026-10-14 afternoon | Soundbar-side, open; reporter to check firmware and setup (section 9) |
+| Soundbar unreachable since 2026-10-14 afternoon | Soundbar-side; reachable again by 2026-10-25, cause unknown (section 9) |
+| Daily credential renewal on the open connection (P1-5) | Verified on the device: every renewal in the logs since 2026-10-27 completed in place (section 7) |
 | Flyout three times too wide after a display scale change; tray menu dead after Alt+F4 | Fixed in v2.3.3 (section 10) |
+| Flyout fully transparent, no edge, after days of sleep and resume | Fixed in the working tree and deployed 2026-11-06 02:12; not committed or released (section 11) |
 | v2.2.8 release | Published 2026-10-13 22:56 UTC with all five assets; CI on `main` green |
 | Full audit with prioritized fix proposal | Done 2026-10-14 (section 4) |
 | Overnight work, 2026-10-14 | Released in v2.3.0; open checks in section 7 |
@@ -375,7 +377,7 @@ morning, at the reporter's request; PR #14, merged during batch 1, was already o
 ### P4-5 packaging (done; release assets unchanged)
 
 Decision: keep shipping one executable; do not ship the DLLs beside it. The reporter keeps loose
-single-file tools in `Documentsin` with `.bak` copies for rollback. Seven files there would clutter
+single-file tools in `Documents\bin` with `.bak` copies for rollback. Seven files there would clutter
 a shared folder, could be overwritten by another app's `wpfgfx_cor3.dll` or `WebView2Loader.dll`, and
 an `.exe.bak` paired with newer DLLs is a broken rollback. Both reported problems are fixed without
 changing the download:
@@ -537,17 +539,16 @@ loaded, one extraction folder in `%TEMP%\.net`, 40 MB private bytes at start. Ro
 
 ### Open items for the reporter
 
-1. The first in-place credential renewal on the device (P1-5) is still unverified: the app was not
-   connected on the night of 2026-10-14 (section 9). At the next renewal while connected, look for
-   `[Credential renewal] Handshake completed with the renewed credentials on the open connection.`
-   in the log; the fallback line also recovers, but means the device wants a new connection.
+1. Done: the in-place credential renewal (P1-5) works on the device. The logs kept on 2026-11-06
+   (from 2026-10-25) show `[Credential renewal] Handshake completed with the renewed credentials on
+   the open connection.` for every daily renewal from 2026-10-27 to 2026-11-06, and no fallback line.
 2. With the display on, compare private bytes against the hardware-rendering figures (P4-4).
 3. P1-2 needs a second monitor with another scale, or a Remote Desktop session, to check placement.
 4. P2-2's notification appears only when sign-in or a soundbar choice is really needed.
 5. P2-9 evidence: a Verbose log over one handshake shows whether ConfirmSignin reports success.
-6. Optionally replace the build in `Documents\bin` with the v2.3.2 framework-dependent release
-   asset, so Settings reports 2.3.1 and the install is the attested build (same code as the
-   16:14 deployment in section 8).
+6. Superseded: `Documents\bin` now runs a newer working-tree build (section 11). Once that fix is
+   released, the release's framework-dependent asset can replace it so the install is an attested
+   build.
 
 ## 8. Framework-dependent download never started (fixed in v2.3.2)
 
@@ -635,6 +636,8 @@ the 00:38 renewal, no sign-in state logged, no notification).
   a plain "Disconnected", using the AirPlay/Spotify announcement or a refused 55051 on a known host.
 - Diagnostics used: a small mDNS PTR prober (`_services._dns-sd._udp.local` lists every service
   type per responder) and a TCP connect to 55051 that distinguishes refused from unanswered.
+- Resolved on the soundbar's side; what changed is not known. On 2026-11-06 the oldest log kept
+  (2026-10-25) already shows the app connected, and it has stayed connected through daily renewals.
 
 ## 10. Flyout three times too wide after a scale change (fixed in v2.3.3)
 
@@ -663,3 +666,79 @@ change came from the display.
   survives a close request and opens again (fails without the `OnClosing` change). 513 tests pass.
 - Deployed: a framework-dependent build of this working tree over the v2.3.2 download in
   `Documents\bin` (reports 2.3.2). Released as v2.3.3 at the reporter's request.
+## 11. Flyout fully transparent, without its edge (fixed in the working tree, deployed)
+
+### Symptom
+
+On 2026-11-06 at 01:53 the reporter sent a screenshot of the flyout with no backdrop at all: the
+wallpaper behind it sharp and untinted, no edge, only the controls floating on the desktop. The
+running copy was the v2.3.3 working-tree build from section 10 (reports 2.3.2), up since
+2026-11-03 14:15, at 4K and 300%.
+
+### Evidence
+
+- Reproduced on the running copy (show-flyout message, then a screen capture): browser text behind
+  the flyout showed through sharp. DWM reported system backdrop `None`, which is what the acrylic
+  path sets; window size, DPI and corners were right.
+- Not the Windows build and not the API: a harness on the same build (26300.9711) that compiles
+  `WindowBackdropService.cs` and `NativeMethods.cs`, with software rendering, PerMonitorV2 and a
+  flyout-like window over a striped window, drew live acrylic.
+- Re-applying did not help. A posted `WM_DWMCOLORIZATIONCOLORCHANGED` made the visible flyout run
+  `ApplyAppearance`, and setting the identical accent from another process: both still transparent.
+  Setting `ACCENT_DISABLED`, waiting 300 ms, then the acrylic accent brought the material back at
+  once (blur, tint, edge, rounded corners). Windows ignores an accent equal to the one the window
+  has, so the refresh the flyout runs on every open could never repair it.
+- The tray menu, which uses the same path, was intact at the time.
+- `GetWindowCompositionAttribute(WCA_ACCENT_POLICY)` fails both in-process and across processes, so
+  the accent cannot be read back from Windows.
+- Trigger not reproduced. Since the app started: DWM had not restarted (it started at logon,
+  14 s before the app), no Remote Desktop session, and four sleep/resume cycles, each followed by a
+  display mode re-enumeration (System log, Display event 4107, `SDC_FORCE_MODE_ENUMERATION`). One of
+  those most likely dropped the hidden flyout's material. These kept the material in the harness:
+  hide and show, `WM_DPICHANGED` for 96 then 288 DPI while hidden, switching
+  `DWMWA_SYSTEMBACKDROP_TYPE` to transient and back, toggling the accent while hidden. Not tried: a
+  real sleep or display reconfiguration, which would disturb the reporter's display.
+
+### Fix
+
+`WindowBackdropService`, acrylic path (the flyout and the tray menu): the accent is on only while
+the window is shown. `WM_WINDOWPOSCHANGING` with `SWP_SHOWWINDOW` turns it on before the window
+appears, so no frame is drawn without a backdrop; `WM_WINDOWPOSCHANGED` with `SWP_HIDEWINDOW` turns
+it off once the window is gone; `ApplyAppearance` applies the state that matches `IsVisible`. Every
+show is therefore a real off-to-on change, which is what repaired the live window, and a hidden
+window holds no material for DWM to drop. Rejected: an off-and-on toggle back to back while
+visible, like the system-backdrop path's reset. It cannot be checked without a broken window,
+because on a healthy one it shows no difference.
+
+### Verification
+
+- `AcrylicBackdropTests`: a transient window's accent is on when shown, off when hidden, stays off
+  through a refresh while hidden, and is on again at the next show (the service records the state it
+  applied, since Windows will not report it); plus the window-position message decision. Four
+  mutations fail the test: the old behavior, the hook removed, the accent always on, and the hook
+  never switching on.
+- Harness with the fixed file: the first show and three hide/show cycles all draw live acrylic,
+  pixel for pixel like the old code (mean luminance 40.5, range 38 to 43 over the striped area).
+- `dotnet format` clean, Release build with `-warnaserror` has no warnings, 521 of 521 tests pass.
+- Real app, after deploying (below): the flyout's first open, and a second open after it had hidden
+  behind the tray menu (the path the fix changes), both drew tinted, blurred acrylic with its edge
+  and rounded corners; the tray menu too. A reopen right after a hide is ignored by design
+  (`FlyoutPresentation`'s correlated tray toggle), so wait a moment between the two when testing.
+- Not verified: the actual trigger. The next sleep and resume will show whether the flyout keeps its
+  backdrop.
+
+### Deployed 2026-11-06 02:12
+
+Framework-dependent publish of the working tree (reports `2.3.3+efab28f`, no references to the
+composite ReadyToRun image), SHA-256 `4CFEB17F1C26067BD3CF17C79414028A158530D5F602358242AAD9238AB86687`,
+over `Documents\bin\BraviaTheatrePC.exe`, started with `explorer.exe`. The build it replaced (the
+section 10 build, reports 2.3.2, SHA-256 `A6A38271...C97E3E6A`) is kept as
+`BraviaTheatrePC.exe.2.3.3.bak`. Checked: running from `Documents\bin`, connected to the soundbar on
+port 55051, 43 MB private bytes, nothing logged since the start.
+
+A trap on the way: the copy failed because the stopped process had not released the file yet, and
+the next line started the old exe again. Retry the copy until it succeeds and compare the hash before
+starting.
+
+Side observation, not investigated: the replaced copy had 117 MB private bytes after 2.5 days,
+against about 40 MB at start (section 7).
