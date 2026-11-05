@@ -14,12 +14,12 @@ Last updated: 2026-11-06
 | gRPC connection pool leaked on every reconnect | Fixed in v2.2.8 |
 | Volume slider stops following the soundbar after an interrupted drag | Fixed in v2.2.8 |
 | Soundbar connection drops every hour | Fixed in v2.2.8; verified on the reporter's soundbar (section 3) |
-| Build on the reporter's PC | Framework-dependent build of the section 11 working tree (reports 2.3.3) since 2026-11-06 02:12 |
+| Build on the reporter's PC | The v2.3.4 framework-dependent release asset (checksum and attestation verified) since 2026-11-06 02:29 (section 11) |
 | Framework-dependent download never starts | Fixed in v2.3.2 (section 8) |
 | Soundbar unreachable since 2026-10-14 afternoon | Soundbar-side; reachable again by 2026-10-25, cause unknown (section 9) |
 | Daily credential renewal on the open connection (P1-5) | Verified on the device: every renewal in the logs since 2026-10-27 completed in place (section 7) |
 | Flyout three times too wide after a display scale change; tray menu dead after Alt+F4 | Fixed in v2.3.3 (section 10) |
-| Flyout fully transparent, no edge, after days of sleep and resume | Fixed in v2.3.4 (`01f7463`); the same code deployed 2026-11-06 02:12 (section 11) |
+| Flyout fully transparent, no edge, after days of sleep and resume | Fixed in v2.3.4 (`01f7463`), which runs on the reporter's PC (section 11) |
 | v2.2.8 release | Published 2026-10-13 22:56 UTC with all five assets; CI on `main` green |
 | Full audit with prioritized fix proposal | Done 2026-10-14 (section 4) |
 | Overnight work, 2026-10-14 | Released in v2.3.0; open checks in section 7 |
@@ -547,8 +547,7 @@ loaded, one extraction folder in `%TEMP%\.net`, 40 MB private bytes at start. Ro
 3. P1-2 needs a second monitor with another scale, or a Remote Desktop session, to check placement.
 4. P2-2's notification appears only when sign-in or a soundbar choice is really needed.
 5. P2-9 evidence: a Verbose log over one handshake shows whether ConfirmSignin reports success.
-6. Superseded: `Documents\bin` now runs a working-tree build of the v2.3.4 code (section 11). The
-   v2.3.4 framework-dependent asset can replace it so the install is an attested build.
+6. Done: `Documents\bin` runs the v2.3.4 framework-dependent release asset (section 11).
 
 ## 8. Framework-dependent download never started (fixed in v2.3.2)
 
@@ -751,5 +750,16 @@ At the reporter's request: `Directory.Build.props` moved to 2.3.4 (`37f258e`), a
 both executables and attested them, then failed at "Create GitHub release": GitHub's API answered
 500, then 502 twice, and no release or draft was created. Re-running the failed job published the
 release (all five assets, marked Latest) at 2026-11-05 23:26 UTC. CI on `main` passed for
-`37f258e`. The deployed build in `Documents\bin` is the same code but not the release asset; it
-reports `2.3.3+efab28f`.
+`37f258e`. Both attempts produced byte-identical executables, so the asset has two matching
+attestations.
+
+### Release asset installed 2026-11-06 02:29
+
+`BraviaTheatrePC-FrameworkDependent.exe` from the v2.3.4 release (reports `2.3.4+37f258e`), SHA-256
+`1759D19D17273AB2BC94F15919243A46600C161CE2A298D9F98B741E638D1DDD`, matching the published `.sha256`;
+`gh attestation verify` confirms it was built by `release.yml` at `refs/tags/v2.3.4`. Copied over
+`Documents\bin\BraviaTheatrePC.exe` and started with `explorer.exe`; the 02:12 working-tree build
+it replaced (SHA-256 `4CFEB17F...8AB86687`) is kept as `BraviaTheatrePC.exe.2.3.4-pre.bak`.
+Checked: running from `Documents\bin`, connected to the soundbar on port 55051, 43 MB private
+bytes, nothing logged since the start. The flyout drew tinted, blurred acrylic with its edge on its
+first open and on a reopen after hiding behind the tray menu.
