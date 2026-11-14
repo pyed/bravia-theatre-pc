@@ -26,6 +26,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Full history, so the tag's commit can be checked against main.
+          fetch-depth: 0
           persist-credentials: false
 
       # global.json is the one place the SDK version is set; Dependabot keeps it current.
@@ -43,6 +45,25 @@ jobs:
           }
 
           "RELEASE_VERSION=$($Matches.version)" >> $env:GITHUB_ENV
+
+      - name: Check that the tag releases main at its declared version
+        shell: pwsh
+        run: |
+          # A v* tag on any commit used to publish a release. Only a commit on main may be
+          # released, and only at the version Directory.Build.props declares.
+          git fetch --no-tags --quiet origin main
+          if ($LASTEXITCODE -ne 0) { throw "Could not fetch main to check the tag against it." }
+          git merge-base --is-ancestor $env:GITHUB_SHA FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw "Tag '$env:GITHUB_REF_NAME' points at a commit that is not on main." }
+
+          [xml]$props = Get-Content -LiteralPath Directory.Build.props -Raw
+          $declared = @($props.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ }) | Select-Object -First 1
+          $release = $env:RELEASE_VERSION
+          # A prerelease tag (v2.4.0-beta1) may release the version it previews.
+          if ($declared -ne $release -and $declared -ne $release.Split('-')[0]) {
+            throw "Tag version $release does not match <Version>$declared</Version> in Directory.Build.props."
+          }
+          Write-Output "Releasing $release from main (Directory.Build.props: $declared)."
 
       - name: Restore dependencies
         run: dotnet restore BraviaTheatrePC.sln -r win-x64 -p:Version=$env:RELEASE_VERSION

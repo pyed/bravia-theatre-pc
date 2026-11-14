@@ -85,6 +85,21 @@ public class PublishFootprintTests
     }
 
     [Fact]
+    public void ReleaseOnlyPublishesACommitOnMainAtItsDeclaredVersion()
+    {
+        // A v* tag on any commit published a release (P4-12).
+        var release = ReadRepositoryFile(Path.Combine(".github", "workflows", "release.yml")).ReplaceLineEndings("\n");
+
+        Assert.Contains("fetch-depth: 0", release, StringComparison.Ordinal);
+        Assert.Contains("git merge-base --is-ancestor $env:GITHUB_SHA FETCH_HEAD", release, StringComparison.Ordinal);
+        Assert.Contains("Directory.Build.props", release, StringComparison.Ordinal);
+        Assert.True(
+            release.IndexOf("Check that the tag releases main", StringComparison.Ordinal)
+                < release.IndexOf("Restore dependencies", StringComparison.Ordinal),
+            "The tag check must run before anything is built.");
+    }
+
+    [Fact]
     public void NativeLibrariesTravelInsideTheExecutableBecauseTheReleaseShipsNothingElse()
     {
         var project = ReadRepositoryFile(Path.Combine("src", "BraviaTheatre.UI", "BraviaTheatre.UI.csproj"));
