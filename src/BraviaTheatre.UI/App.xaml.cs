@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using BraviaTheatre.Core;
 using BraviaTheatre.Core.Auth;
+using BraviaTheatre.Core.Discovery;
 using BraviaTheatre.Core.Engine;
 using BraviaTheatre.Core.Models;
 using BraviaTheatre.UI.Models;
@@ -28,6 +29,8 @@ public partial class App : Application
     private GlobalHotkeyService? _hotkeyService;
     private SonyCredentialLifecycle? _credentialLifecycle;
     private AppSettings _settings = new();
+    // One for the app's lifetime, so each engine continues the last one's sweep and pauses.
+    private SubnetProbePlan _subnetProbes = new();
     private SettingsWindow? _settingsWindow;
     private AuthDialog? _authDialog;
     private DeviceSelectionDialog? _deviceSelectionDialog;
@@ -197,6 +200,8 @@ public partial class App : Application
 
         _settings = AppSettings.Load(out var settingsWarning);
         SetLogLevel(_settings.LogLevel);
+        _subnetProbes = new SubnetProbePlan(_settings.SoundbarNetwork);
+        _subnetProbes.SoundbarNetworkChanged += OnSoundbarNetworkChanged;
         if (!string.IsNullOrWhiteSpace(settingsWarning))
             MessageBox.Show(settingsWarning, "Settings Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
 
@@ -534,7 +539,11 @@ public partial class App : Application
                 Log("Configured static host is not a valid host name or IP address; using automatic discovery instead.", DiagnosticLevel.Critical);
         }
         var port = _settings.StaticPort is >= 1 and <= 65535 ? _settings.StaticPort : 55051;
-        var newEngine = new BraviaEngine(credentialLifecycle, host, port) { LogAction = Log };
+        var newEngine = new BraviaEngine(credentialLifecycle, host, port)
+        {
+            LogAction = Log,
+            SubnetProbes = _subnetProbes
+        };
         _engine = newEngine;
         _hotkeyService = new GlobalHotkeyService(newEngine);
         ApplyHotkeySettings(showUserError: false);
@@ -542,6 +551,23 @@ public partial class App : Application
         newEngine.StateChanged += _engineStateChangedHandler;
         newEngine.Start();
         Log("Engine started and running in system tray.", DiagnosticLevel.Info);
+    }
+
+    // Raised on the engine's thread when the soundbar turns up on a network other than the one
+    // stored, so the subnet probe stays off other networks after a restart too.
+    private void OnSoundbarNetworkChanged(string network)
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_isShuttingDown) return;
+            // Changed in place: an open Settings window copies this object when it saves.
+            _settings.SoundbarNetwork = network;
+            if (_settings.TrySave(out var error))
+                Log("Remembered the soundbar's network; the subnet probe now sweeps only that network.", DiagnosticLevel.Info);
+            else
+                Log(error ?? "Could not save the soundbar's network.", DiagnosticLevel.Info);
+        });
     }
 
     private long InvalidateEngineState(BraviaEngine? engine)

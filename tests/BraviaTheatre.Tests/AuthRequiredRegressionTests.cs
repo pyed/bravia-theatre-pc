@@ -74,6 +74,43 @@ public class AuthRequiredRegressionTests
     }
 
     [Fact]
+    public async Task NearExpiryIsJudgedByTheEnginesClock()
+    {
+        // Years away by the wall clock, a minute away by the engine's: the engine's clock decides.
+        var engineNow = DateTimeOffset.UtcNow.AddYears(3);
+        var clock = new ManualClock { UtcNow = engineNow };
+        var stale = Credentials("stale", engineNow.AddMinutes(1));
+        var renewed = Credentials("renewed", engineNow.AddHours(12));
+        var refreshCount = 0;
+        var client = new FakeBraviaClient();
+        var lifecycle = Lifecycle(stale, (_, _) =>
+        {
+            Interlocked.Increment(ref refreshCount);
+            return Task.FromResult(renewed);
+        });
+        var engine = new BraviaEngine(
+            lifecycle,
+            "192.168.1.50",
+            4000,
+            (_, _, _) => client,
+            static (_, ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct),
+            clock);
+
+        try
+        {
+            engine.Start();
+            await client.NotificationsStarted.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, Volatile.Read(ref refreshCount));
+            Assert.Same(renewed, lifecycle.CurrentCredentials);
+        }
+        finally
+        {
+            await StopEngineAsync(engine);
+        }
+    }
+
+    [Fact]
     public async Task RenewedSnapshotStillInsideWindow_DoesNotProactivelyRefreshLoop()
     {
         var stale = Credentials("stale", DateTimeOffset.UtcNow.AddMinutes(1));
@@ -578,7 +615,8 @@ public class AuthRequiredRegressionTests
             Assert.Equal(
                 [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(20)],
                 reconnectDelays.ToArray());
-            Assert.Equal(3, Volatile.Read(ref refreshCount));
+            // The renewal is not repeated on every reconnect: it waits for its own backoff (P2-20).
+            Assert.Equal(1, Volatile.Read(ref refreshCount));
             Assert.Equal(3, Volatile.Read(ref clientCount));
             Assert.False(engine.CurrentState.AuthRequired);
         }
@@ -591,6 +629,7 @@ public class AuthRequiredRegressionTests
     [Fact]
     public async Task RotatedTokenCheckpoint_RecoversAfterTransientCloudFailureWithoutAuthenticationPrompt()
     {
+        var clock = new ManualClock();
         var credentials = Credentials("transient");
         var renewed = Credentials("renewed", DateTimeOffset.UtcNow.AddHours(12)) with
         {
@@ -630,9 +669,16 @@ public class AuthRequiredRegressionTests
                 clientCredentials.Add(current);
                 return clients.Dequeue();
             },
-            (delay, ct) => delay == TimeSpan.FromSeconds(5)
-                ? Task.CompletedTask
-                : Task.Delay(Timeout.InfiniteTimeSpan, ct));
+            (delay, ct) =>
+            {
+                if (delay != TimeSpan.FromSeconds(5))
+                    return Task.Delay(Timeout.InfiniteTimeSpan, ct);
+
+                // The failed renewal's backoff has run by the next attempt.
+                clock.Advance(BraviaEngine.FirstRenewalRetryDelay);
+                return Task.CompletedTask;
+            },
+            clock);
 
         try
         {
@@ -655,6 +701,117 @@ public class AuthRequiredRegressionTests
         }
         finally
         {
+            await StopEngineAsync(engine);
+        }
+    }
+
+    [Fact]
+    public async Task FailedRenewalWaitsForAGrowingBackoffInsteadOfEveryReconnect()
+    {
+        // Expired keys the soundbar rejects, and a Sony cloud that rotates the refresh token, then
+        // fails to issue keys, every time. Each rotation publishes new (checkpoint) credentials,
+        // which must not count as a new sign-in that lifts the backoff.
+        var clock = new ManualClock();
+        var expired = Credentials("expired", DateTimeOffset.UtcNow.AddMinutes(-1));
+        var refreshAttempts = new System.Collections.Concurrent.ConcurrentQueue<int>();
+        var reconnects = 0;
+        var done = NewSignal();
+        var lifecycle = new SonyCredentialLifecycle(
+            expired,
+            async (_, checkpointRotatedRefreshTokenAsync, _) =>
+            {
+                refreshAttempts.Enqueue(Volatile.Read(ref reconnects) + 1);
+                await checkpointRotatedRefreshTokenAsync($"rotated-{refreshAttempts.Count}");
+                throw new SonyOAuthException(SonyOAuthFailureKind.Transient, "cloud unavailable");
+            },
+            static (_, ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            });
+        var engine = new BraviaEngine(
+            lifecycle,
+            "192.168.1.50",
+            4000,
+            (_, _, _) => new FakeBraviaClient { InitFailure = InvalidArgument("expired") },
+            (delay, ct) =>
+            {
+                if (delay == TimeSpan.FromSeconds(25))
+                    return Task.Delay(Timeout.InfiniteTimeSpan, ct);
+
+                var attempt = Interlocked.Increment(ref reconnects);
+                if (attempt is 3 or 6 or 8)
+                    clock.Advance(TimeSpan.FromMinutes(1));
+                if (attempt < 10)
+                    return Task.CompletedTask;
+
+                done.TrySetResult(true);
+                return Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            },
+            clock);
+
+        try
+        {
+            engine.Start();
+            await done.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+
+            // Attempt 1 renews; the next waits a minute (until attempt 4), then two (until attempt 9).
+            Assert.Equal([1, 4, 9], refreshAttempts.ToArray());
+            Assert.False(engine.CurrentState.AuthRequired);
+        }
+        finally
+        {
+            await StopEngineAsync(engine);
+        }
+    }
+
+    [Fact]
+    public async Task NewCredentialsAreNotHeldBackByTheOldOnesRenewalBackoff()
+    {
+        // The new sign-in's keys are close to expiry too, so it needs a renewal of its own at once.
+        var expired = Credentials("expired", DateTimeOffset.UtcNow.AddMinutes(-1));
+        var signedIn = Credentials("signed-in", DateTimeOffset.UtcNow.AddMinutes(2));
+        var renewed = Credentials("renewed", DateTimeOffset.UtcNow.AddHours(12));
+        var firstAttemptOver = NewSignal();
+        var connected = new FakeBraviaClient();
+        var clients = new Queue<IBraviaClient>([
+            new FakeBraviaClient { InitFailure = InvalidArgument("expired") },
+            connected]);
+        var lifecycle = Lifecycle(expired, (current, _) => ReferenceEquals(current, signedIn)
+            ? Task.FromResult(renewed)
+            : throw new SonyOAuthException(SonyOAuthFailureKind.Transient, "cloud unavailable"));
+        var release = NewSignal();
+        var engine = new BraviaEngine(
+            lifecycle,
+            "192.168.1.50",
+            4000,
+            (_, _, _) => clients.Dequeue(),
+            async (delay, ct) =>
+            {
+                if (delay == TimeSpan.FromSeconds(25))
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                    return;
+                }
+
+                firstAttemptOver.TrySetResult(true);
+                await release.Task.WaitAsync(ct);
+            });
+
+        try
+        {
+            engine.Start();
+            await firstAttemptOver.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+            Assert.Equal(CredentialRenewalStatus.Succeeded, (await lifecycle.InstallAsync(signedIn, TestContext.Current.CancellationToken)).Status);
+            release.TrySetResult(true);
+
+            await connected.NotificationsStarted.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+            Assert.True(engine.CurrentState.Connected);
+            Assert.Same(renewed, lifecycle.CurrentCredentials);
+        }
+        finally
+        {
+            release.TrySetResult(true);
             await StopEngineAsync(engine);
         }
     }
@@ -993,6 +1150,56 @@ public class AuthRequiredRegressionTests
     }
 
     [Fact]
+    public async Task KeepaliveRenewalNeedingSignIn_AsksForItBeforeTheReconnectBackoff()
+    {
+        var original = Credentials("original", DateTimeOffset.UtcNow.AddHours(1));
+        var nearExpiry = Credentials("near", DateTimeOffset.UtcNow.AddMinutes(1));
+        var client = new FakeBraviaClient();
+        var keepaliveDelayStarted = NewSignal();
+        var releaseKeepalive = NewSignal();
+        var backoffStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var keepaliveCount = 0;
+        var lifecycle = Lifecycle(original, (_, _) =>
+            throw new SonyOAuthException(SonyOAuthFailureKind.ReauthenticationRequired, "revoked"));
+        BraviaEngine? engine = null;
+        engine = new BraviaEngine(
+            lifecycle,
+            "192.168.1.50",
+            4000,
+            (_, _, _) => client,
+            (delay, ct) =>
+            {
+                if (delay == TimeSpan.FromSeconds(25)
+                    && Interlocked.Increment(ref keepaliveCount) == 1)
+                {
+                    keepaliveDelayStarted.TrySetResult(true);
+                    return releaseKeepalive.Task.WaitAsync(ct);
+                }
+
+                if (delay == TimeSpan.FromSeconds(5))
+                    backoffStarted.TrySetResult(engine!.CurrentState.AuthRequired);
+
+                return Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            });
+
+        try
+        {
+            engine.Start();
+            await keepaliveDelayStarted.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+            await lifecycle.InstallAsync(nearExpiry, TestContext.Current.CancellationToken);
+            releaseKeepalive.TrySetResult(true);
+
+            // The prompt is published with the disconnect, not one backoff later.
+            Assert.True(await backoffStarted.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            releaseKeepalive.TrySetResult(true);
+            await StopEngineAsync(engine);
+        }
+    }
+
+    [Fact]
     public async Task KeepaliveRenewalTransientFailure_KeepsTheConnectionWithoutRetryingEachPoll()
     {
         var original = Credentials("original", DateTimeOffset.UtcNow.AddHours(1));
@@ -1138,6 +1345,22 @@ public class AuthRequiredRegressionTests
 
     private static TaskCompletionSource<bool> NewSignal() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>A monotonic clock the test moves; the wall clock is real unless set.</summary>
+    private sealed class ManualClock : TimeProvider
+    {
+        private long _timestamp;
+
+        public DateTimeOffset? UtcNow { get; init; }
+
+        public override DateTimeOffset GetUtcNow() => UtcNow ?? base.GetUtcNow();
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => Interlocked.Read(ref _timestamp);
+
+        public void Advance(TimeSpan by) => Interlocked.Add(ref _timestamp, by.Ticks);
+    }
 
     private static async Task UntilAsync(Func<bool> condition)
     {

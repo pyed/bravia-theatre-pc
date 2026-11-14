@@ -26,6 +26,12 @@ public sealed class AppSettings
 
     public string? StaticHost { get; set; } = "";
     public int StaticPort { get; set; } = 55051;
+
+    /// <summary>
+    /// The network the soundbar was last found on ("192.168.1.0/24"). Discovery sweeps only this
+    /// network for the soundbar; empty until it has been found once.
+    /// </summary>
+    public string? SoundbarNetwork { get; set; }
     public string LogLevel { get; set; } = "Critical";
 
     public static string SettingsFilePath => Path.Combine(App.GetAppDataDir(), "settings.json");
