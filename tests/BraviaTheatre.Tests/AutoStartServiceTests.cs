@@ -16,4 +16,20 @@ public class AutoStartServiceTests
         Assert.Equal(expected, AutoStartService.IsTemporaryLocation(executablePath, @"C:\Users\someone\AppData\Local\Temp\"));
         Assert.Equal(expected, AutoStartService.IsTemporaryLocation(executablePath, @"C:\Users\someone\AppData\Local\Temp"));
     }
+
+    // Moving the executable left the old Run entry behind; Settings then showed the box off and
+    // saving deleted an entry that another, still existing copy relied on (HANDOFF P2-21).
+    [Theory]
+    [InlineData(null, false, RunEntryState.None)]
+    [InlineData("", false, RunEntryState.None)]
+    [InlineData("\"C:\\Apps\\BraviaTheatrePC.exe\"", true, RunEntryState.ThisCopy)]
+    [InlineData("c:\\apps\\braviatheatrepc.exe", true, RunEntryState.ThisCopy)]
+    [InlineData("\"C:\\Old\\BraviaTheatrePC.exe\"", true, RunEntryState.OtherCopy)]
+    [InlineData("\"C:\\Old\\BraviaTheatrePC.exe\"", false, RunEntryState.MissingCopy)]
+    public void TheRunEntryIsClassifiedAgainstTheRunningCopy(string? command, bool registeredFileExists, object expected)
+    {
+        var (state, _) = AutoStartService.Classify(command, @"C:\Apps\BraviaTheatrePC.exe", _ => registeredFileExists);
+
+        Assert.Equal((RunEntryState)expected, state);
+    }
 }

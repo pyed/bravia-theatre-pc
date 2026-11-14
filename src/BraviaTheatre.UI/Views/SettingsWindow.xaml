@@ -171,6 +171,11 @@
                                               FontWeight="SemiBold"/>
                                     <TextBlock Text="The controller starts quietly in the system tray."
                                                Style="{StaticResource CaptionText}" Margin="24,4,0,0"/>
+                                    <TextBlock x:Name="TxtAutoStartOtherCopy"
+                                               Style="{StaticResource CaptionText}"
+                                               Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                               Visibility="Collapsed"
+                                               Margin="24,4,0,0"/>
 
                                     <Separator Margin="0,14"/>
 

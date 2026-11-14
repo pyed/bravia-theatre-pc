@@ -143,6 +143,8 @@ public partial class App : Application
         {
             if (args.Exception is OperationCanceledException or ObjectDisposedException)
             {
+                // Not worth a dialog, but a use after dispose on the UI thread must leave a trace.
+                Log($"Dispatcher exception ignored: {FormatExceptionForLog(args.Exception)}", DiagnosticLevel.Info);
                 args.Handled = true;
                 return;
             }
@@ -174,6 +176,9 @@ public partial class App : Application
         if (!createdNew)
         {
             Log("Another instance is already running. Signaling Quick Settings flyout.", DiagnosticLevel.Info);
+            // This process was just started by the user, so it may hand the foreground on; without
+            // that the running copy's flyout could open unfocused and then not close by itself.
+            NativeMethods.AllowSetForegroundWindow(NativeMethods.AsfwAny);
             uint wmShowFlyout = NativeMethods.RegisterWindowMessage("BRAVIA_THEATRE_PC_SHOW_FLYOUT");
             NativeMethods.PostMessage(HWND_BROADCAST, wmShowFlyout, IntPtr.Zero, IntPtr.Zero);
             Shutdown();
@@ -202,6 +207,10 @@ public partial class App : Application
         SetLogLevel(_settings.LogLevel);
         _subnetProbes = new SubnetProbePlan(_settings.SoundbarNetwork);
         _subnetProbes.SoundbarNetworkChanged += OnSoundbarNetworkChanged;
+        if (AutoStartService.TryRepairMovedEntry(out var autoStartError))
+            Log("Start with Windows named a copy of the app that no longer exists; it now starts this one.", DiagnosticLevel.Info);
+        else if (autoStartError != null)
+            Log(autoStartError, DiagnosticLevel.Info);
         if (!string.IsNullOrWhiteSpace(settingsWarning))
             MessageBox.Show(settingsWarning, "Settings Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
 
@@ -337,7 +346,7 @@ public partial class App : Application
         if (shown)
             Log("Native System Tray Icon shown.", DiagnosticLevel.Info);
         else
-            Log("Native System Tray Icon failed to initialize.", DiagnosticLevel.Critical);
+            Log("Native System Tray Icon could not be added yet; retrying.", DiagnosticLevel.Critical);
         return shown;
     }
 
@@ -387,7 +396,8 @@ public partial class App : Application
 
             if (connectionChanged && _credentialLifecycle?.CurrentCredentials?.IsValid == true)
             {
-                ReplaceEngine();
+                // The new engine registers the shortcuts afresh, so a refused one is reported here too.
+                ReplaceEngine(showHotkeyErrors: true);
             }
             else
             {
@@ -507,7 +517,7 @@ public partial class App : Application
         _deviceSelectionDialog?.Close();
     }
 
-    private void ReplaceEngine()
+    private void ReplaceEngine(bool showHotkeyErrors = false)
     {
         CancelDeviceRecovery();
         var credentialLifecycle = _credentialLifecycle
@@ -546,7 +556,7 @@ public partial class App : Application
         };
         _engine = newEngine;
         _hotkeyService = new GlobalHotkeyService(newEngine);
-        ApplyHotkeySettings(showUserError: false);
+        ApplyHotkeySettings(showUserError: showHotkeyErrors);
         _engineStateChangedHandler = state => OnEngineStateChanged(generation, state);
         newEngine.StateChanged += _engineStateChangedHandler;
         newEngine.Start();

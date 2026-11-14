@@ -107,6 +107,18 @@ public sealed class NativeTrayIcon : IDisposable
     private bool _disposed;
     private DispatcherTimer? _explorerRecoveryTimer;
     private int _explorerRecoveryAttempts;
+    private int _recoveryAttemptLimit;
+    private bool _recoveringFromStartup;
+    private int _lastAddError;
+
+    // After an Explorer restart the new taskbar answers within moments.
+    internal static readonly TimeSpan ExplorerRestartRetryInterval = TimeSpan.FromMilliseconds(200);
+    internal const int ExplorerRestartAttempts = 8;
+
+    // At sign-in Explorer can be too busy to answer for a while, and that is when Windows starts
+    // the app from its Run entry; give it five minutes.
+    internal static readonly TimeSpan StartupRetryInterval = TimeSpan.FromSeconds(2);
+    internal const int StartupAttempts = 150;
 
     public Action? ContextMenuAction { get; set; }
     internal Action<TrayActivation>? ToggleAction { get; set; }
@@ -141,11 +153,19 @@ public sealed class NativeTrayIcon : IDisposable
         };
     }
 
+    /// <summary>Adds or updates the icon; false while Windows has not accepted it yet.</summary>
     public bool Show(Icon icon, string tooltip)
     {
         ThrowIfDisposed();
         SetPresentation(icon, tooltip);
-        return _isAdded ? Modify() : Add();
+        if (_isAdded) return Modify();
+        if (Add()) return true;
+
+        // Shell_NotifyIcon can time out while Explorer is busy. Only an Explorer restart used to
+        // trigger another attempt, so an app started at sign-in could run for good without an icon.
+        _recoveringFromStartup = true;
+        BeginRecovery(StartupRetryInterval, StartupAttempts);
+        return false;
     }
 
     public bool UpdateIcon(Icon icon, string tooltip)
@@ -198,13 +218,15 @@ public sealed class NativeTrayIcon : IDisposable
             : tooltip.Length > 127 ? tooltip[..127] : tooltip;
     }
 
-    private bool Add()
+    private bool Add(bool logFailure = true)
     {
         _nid.uFlags = PresentationFlags;
         if (!Shell_NotifyIcon(NIM_ADD, ref _nid))
         {
             _isAdded = false;
-            LogAction?.Invoke($"Tray icon add failed (Win32 error {Marshal.GetLastWin32Error()}).");
+            _lastAddError = Marshal.GetLastWin32Error();
+            if (logFailure)
+                LogAction?.Invoke($"Tray icon add failed (Win32 error {_lastAddError}).");
             return false;
         }
 
@@ -261,7 +283,8 @@ public sealed class NativeTrayIcon : IDisposable
         {
             _isAdded = false;
             _usesVersion4 = false;
-            BeginExplorerRecovery();
+            _recoveringFromStartup = false;
+            BeginRecovery(ExplorerRestartRetryInterval, ExplorerRestartAttempts);
             handled = true;
         }
 
@@ -302,14 +325,15 @@ public sealed class NativeTrayIcon : IDisposable
         _ = Shell_NotifyIcon(NIM_SETFOCUS, ref focusData);
     }
 
-    private void BeginExplorerRecovery()
+    private void BeginRecovery(TimeSpan interval, int attemptLimit)
     {
         StopExplorerRecovery();
         _explorerRecoveryAttempts = 0;
+        _recoveryAttemptLimit = attemptLimit;
 
         var timer = new DispatcherTimer(DispatcherPriority.Background, _hwndSource.Dispatcher)
         {
-            Interval = TimeSpan.FromMilliseconds(200)
+            Interval = interval
         };
         timer.Tick += (_, _) => TryCompleteExplorerRecovery();
         _explorerRecoveryTimer = timer;
@@ -328,16 +352,24 @@ public sealed class NativeTrayIcon : IDisposable
         }
 
         _explorerRecoveryAttempts++;
-        if (!_isAdded && !Add())
+        if (!_isAdded && !Add(logFailure: false))
         {
-            if (_explorerRecoveryAttempts >= 8)
+            if (_explorerRecoveryAttempts >= _recoveryAttemptLimit)
+            {
                 StopExplorerRecovery();
+                LogAction?.Invoke($"Tray icon could not be added after {_explorerRecoveryAttempts} attempts (Win32 error {_lastAddError}).");
+            }
             return;
         }
 
-        if (TryGetIconBounds(out _) || _explorerRecoveryAttempts >= 8)
+        if (TryGetIconBounds(out _) || _explorerRecoveryAttempts >= _recoveryAttemptLimit)
         {
             StopExplorerRecovery();
+            if (_recoveringFromStartup)
+            {
+                _recoveringFromStartup = false;
+                LogAction?.Invoke($"Tray icon added after {_explorerRecoveryAttempts + 1} attempts.");
+            }
             IconRecreatedAction?.Invoke();
         }
     }

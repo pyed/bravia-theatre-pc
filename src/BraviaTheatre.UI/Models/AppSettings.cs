@@ -38,16 +38,29 @@ public sealed class AppSettings
 
     public AppSettings Copy() => (AppSettings)MemberwiseClone();
 
-    public static AppSettings Load(out string? warning)
+    public static AppSettings Load(out string? warning) => Load(SettingsFilePath, out warning);
+
+    internal static AppSettings Load(string path, out string? warning)
     {
         warning = null;
-        if (File.Exists(SettingsFilePath))
-        {
-            if (TryRead(SettingsFilePath, out var loaded, out var error))
-                return loaded!;
-
-            warning = error;
+        if (!File.Exists(path))
             return new AppSettings();
+
+        if (TryRead(path, out var loaded, out var error))
+            return loaded!;
+
+        // The defaults are saved over this file during the same start (the tray guidance marks
+        // itself shown), which lost shortcuts, host and log level for good. Keep the unreadable
+        // file beside it instead.
+        var keptAs = path + ".bad";
+        try
+        {
+            File.Move(path, keptAs, overwrite: true);
+            warning = $"{error}\n\nDefault settings are in use. The unreadable file was kept as {keptAs}.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            warning = $"{error}\n\nDefault settings are in use.";
         }
 
         return new AppSettings();
