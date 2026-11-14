@@ -29,7 +29,7 @@ Last updated: 2026-11-14
 | v2.3.2 release | Published 2026-10-14 16:46 (13:46 UTC) with all five assets; both executables passed the release run's startup check; CI on `main` green |
 | v2.3.4 release | Published 2026-11-06 02:26 (2026-11-05 23:26 UTC) with all five assets on the run's second attempt; both executables passed the startup check; CI on `main` green (section 11) |
 | Second full audit (source, release pipeline, repository) | Done 2026-11-14 on v2.3.4 by reading (section 12) |
-| Fixes for the second audit's findings | On branch `claude/gifted-hopper-4e650w` (2026-11-14), not merged or released; everything except P4-10, and two settings for the owner. CI on the final tree in section 12, "Fixes" |
+| Fixes for the second audit's findings | On branch `claude/gifted-hopper-4e650w` (2026-11-14), not merged or released; everything except P4-10, and two settings for the owner. CI run 71 on the final tree green: 573 of 573 tests on Windows (section 12, "Fixes") |
 | Self-contained download bundles .NET runtime 10.0.10 (P4-7) | Fixed on the branch: SDK 10.0.404, runtime 10.0.15; reaches users only with the next release |
 | `feature/tv-follow` (turn the soundbar on with a Samsung TV) | Not wanted: the owner does not want TV-specific features in this project (2026-11-14). It was merged into the branch without being asked for, then reverted; do not merge it. Closing the branch is left to the owner |
 
@@ -866,15 +866,16 @@ needs merging), then P2-12 to P2-14; most other rows are under an hour each.
 At the reporter's request every finding above was fixed on the branch, except P4-10 and two settings
 only the owner can change. Commits: `b8acc7f` (SDK and dependencies), `7d32dd0` (discovery and
 engine), `5c1e6f5` (UI), `575e080` (release guard, policy). `b3d3812` merged `feature/tv-follow`
-without the owner asking for it; the commit after `6ae4ad3` reverts it (see P4-11).
+without the owner asking for it; `c441bd7` reverts it (see P4-11).
 
 How it was checked, overall: in the Linux container (section 5) `dotnet format` is clean, the
 Release build with `-warnaserror` has no warnings, and the 367 Core tests pass, five runs in a row.
 For every engine and discovery fix, reverting it in a scratch copy made its new test fail (15
-mutations, all caught). CI on the branch (`workflow_dispatch`): run 67 on `7d32dd0` and run 68 on
-`575e080` passed (run 68's tree still had TV follow); the run on the final tree is pending: SDK
-10.0.404 restore, format, the build, the tests on Windows, NuGet audit, both publishes containing
-only the executable, both executables still running after 20 s, gitleaks.
+mutations, all caught). CI on the branch (`workflow_dispatch`): runs 67 (`7d32dd0`) and 68
+(`575e080`, which still had TV follow) passed, and run 71 on the final tree (`c441bd7`) passed: SDK
+10.0.404 restore, format, build with 0 warnings, 573 of 573 tests on Windows, NuGet audit clean,
+both publishes containing only the executable, both executables still running after 20 s, gitleaks
+clean.
 Not exercised on a real desktop or against the soundbar: everything below marked "compile only".
 
 | ID | What changed | Verified |
@@ -896,7 +897,7 @@ Not exercised on a real desktop or against the soundbar: everything below marked
 | P3-11 | Credential expiry uses the engine's `TimeProvider`. | `NearExpiryIsJudgedByTheEnginesClock`. |
 | P4-9 | `SECURITY.md` supports the latest release instead of naming a version line. | Read. |
 | P4-10 | **Open.** Needs a one-off capture on the reporter's device (app stopped) to learn what the reply token signs. Reading the reference implementation was not possible: adding `steamEngineer/pybravia-connect` to the session was declined. | |
-| P4-11 | **Not merged, by the owner's decision (2026-11-14): no TV-specific features in this project.** The branch had been merged here (`b3d3812`) on the audit's "test and merge it, or close it" without the owner asking; the merge is reverted, and CLAUDE.md now records the scope. Closing `feature/tv-follow`, and deleting the four merged remote branches (`claude/practical-mayer-b95xzo`, `codex/recover-stale-sony-association`, `fix/ci-hardening`, `perf/lightweight-publish`), is left to the owner: it writes to other branches. | The revert leaves the code exactly as before the merge plus `575e080` (`git diff` against a tree rebuilt without the merge is empty). |
+| P4-11 | **Not merged, by the owner's decision (2026-11-14): no TV-specific features in this project.** The branch had been merged here (`b3d3812`) on the audit's "test and merge it, or close it" without the owner asking; the merge is reverted (`c441bd7`), and CLAUDE.md now records the scope. Closing `feature/tv-follow`, and deleting the four merged remote branches (`claude/practical-mayer-b95xzo`, `codex/recover-stale-sony-association`, `fix/ci-hardening`, `perf/lightweight-publish`), is left to the owner: it writes to other branches. | The revert leaves the code exactly as before the merge plus `575e080` (`git diff` against a tree rebuilt without the merge is empty). |
 | P4-12 | `release.yml` checks out full history and fails before building unless the tag's commit is on `main` and the tag equals `<Version>` (a prerelease tag may preview it). **Still open:** a required reviewer on the `release` environment, a repository setting. | Tested with PowerShell 7.6 against a scratch remote (on main and matching passes; off main, or a mismatched version, fails); `ReleaseOnlyPublishesACommitOnMainAtItsDeclaredVersion`. Not run as a real release. |
 
 Smaller observations: the sign-in prompt is now published with the disconnect
