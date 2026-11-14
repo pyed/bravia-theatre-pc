@@ -122,7 +122,14 @@ public class WireCodecTests
         Assert.True(CommandBuilder.ParseExecResponse(new byte[] { 0x08, 0x01 }));
         Assert.False(CommandBuilder.ParseExecResponse(new byte[] { 0x08, 0x00 }));
         Assert.True(CommandBuilder.ParseExecResponse(Array.Empty<byte>()));
-        Assert.False(CommandBuilder.ParseExecResponse(new byte[] { 0x08, 0x01, 0x10, 0x01 }));
+        // A success may carry other fields; only field 1 decides.
+        Assert.True(CommandBuilder.ParseExecResponse(new byte[] { 0x08, 0x01, 0x10, 0x01 }));
+        Assert.True(CommandBuilder.ParseExecResponse(new byte[] { 0x10, 0x05, 0x08, 0x01 }));
+        Assert.False(CommandBuilder.ParseExecResponse(new byte[] { 0x10, 0x05, 0x08, 0x00 }));
+        Assert.False(CommandBuilder.ParseExecResponse(new byte[] { 0x10, 0x01 }));
+        Assert.False(CommandBuilder.ParseExecResponse(new byte[] { 0x0A, 0x01, 0x01 }));
+        Assert.False(CommandBuilder.ParseExecResponse(new byte[] { 0x08 }));
+        Assert.False(CommandBuilder.ParseExecResponse(new byte[] { 0xFF, 0xFF }));
     }
 
     [Fact]
@@ -225,5 +232,44 @@ public class WireCodecTests
             offset += value.Length;
         }
         return result;
+    }
+
+    public static TheoryData<string, byte[], object?> StateValues => new()
+    {
+        { "varint", [0x10, 0x2A], 42 },
+        { "negative varint", [0x10, .. ProtobufWireCodec.EncodeVarint(-3L)], -3 },
+        { "nested varint", ProtobufWireCodec.LengthDelimited(2, [0x08, 0x2A]), 42 },
+        { "nested string in field 2", ProtobufWireCodec.LengthDelimited(2, ProtobufWireCodec.LengthDelimited(1, Encoding.UTF8.GetBytes("hdmi"))), "hdmi" },
+        { "empty field 2", ProtobufWireCodec.LengthDelimited(2, []), 0 },
+        { "raw text in field 2", ProtobufWireCodec.LengthDelimited(2, Encoding.UTF8.GetBytes("on")), null },
+        { "nested boolean", ProtobufWireCodec.LengthDelimited(3, [0x08, 0x01]), true },
+        { "empty field 3", ProtobufWireCodec.LengthDelimited(3, []), false },
+        { "string in field 4", ProtobufWireCodec.LengthDelimited(4, ProtobufWireCodec.LengthDelimited(1, Encoding.UTF8.GetBytes("dolby_atmos"))), "dolby_atmos" },
+        { "string in field 5", ProtobufWireCodec.LengthDelimited(5, ProtobufWireCodec.LengthDelimited(1, Encoding.UTF8.GetBytes("5.1.2"))), "5.1.2" },
+        {
+            "field 4 before field 2",
+            [.. ProtobufWireCodec.LengthDelimited(2, [0x08, 0x07]), .. ProtobufWireCodec.LengthDelimited(4, ProtobufWireCodec.LengthDelimited(1, Encoding.UTF8.GetBytes("tv")))],
+            "tv"
+        },
+    };
+
+    // Snapshots and notifications carry the same entry. They used to decode its value with two
+    // functions that disagreed: a notification read a string nested in field 2 as its raw bytes.
+    [Theory]
+    [MemberData(nameof(StateValues))]
+    public void SnapshotAndNotificationDecodeAnEntryValueTheSameWay(string description, byte[] valueField, object? expected)
+    {
+        var entry = ProtobufWireCodec.LengthDelimited(1, Encoding.UTF8.GetBytes("test.path")).Concat(valueField).ToArray();
+        var snapshot = ProtobufWireCodec.LengthDelimited(1, ProtobufWireCodec.LengthDelimited(1, entry));
+        var notification = ProtobufWireCodec.LengthDelimited(2,
+            ProtobufWireCodec.LengthDelimited(1, ProtobufWireCodec.LengthDelimited(1, entry)));
+
+        var states = StatesCodec.ParseGetStatesResponse(snapshot);
+        var (path, notified) = NotifyParser.ParseNotifyMessage(notification);
+
+        Assert.True(states.ContainsKey("test.path"), description);
+        Assert.Equal("test.path", path);
+        Assert.Equal(expected, states["test.path"]);
+        Assert.Equal(expected, notified);
     }
 }

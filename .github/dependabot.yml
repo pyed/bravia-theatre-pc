@@ -10,6 +10,13 @@ updates:
         patterns:
           - "*"
 
+  # The SDK pinned in global.json decides the .NET runtime bundled into the self-contained
+  # release, so its security updates matter as much as the packages'.
+  - package-ecosystem: "dotnet-sdk"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

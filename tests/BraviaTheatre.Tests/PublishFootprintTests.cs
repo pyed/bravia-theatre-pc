@@ -69,6 +69,37 @@ public class PublishFootprintTests
     }
 
     [Fact]
+    public void WorkflowsInstallTheSdkThatGlobalJsonPinsAndDependabotWatchesIt()
+    {
+        // The SDK decides the runtime inside the self-contained release. A version repeated in the
+        // workflows stayed on 10.0.302 while five runtime security releases went by (P4-7).
+        foreach (var workflow in new[] { "ci.yml", "release.yml" })
+        {
+            var text = ReadRepositoryFile(Path.Combine(".github", "workflows", workflow));
+            Assert.Contains("global-json-file: global.json", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("dotnet-version:", text, StringComparison.Ordinal);
+        }
+
+        var dependabot = ReadRepositoryFile(Path.Combine(".github", "dependabot.yml"));
+        Assert.Contains("package-ecosystem: \"dotnet-sdk\"", dependabot, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReleaseOnlyPublishesACommitOnMainAtItsDeclaredVersion()
+    {
+        // A v* tag on any commit published a release (P4-12).
+        var release = ReadRepositoryFile(Path.Combine(".github", "workflows", "release.yml")).ReplaceLineEndings("\n");
+
+        Assert.Contains("fetch-depth: 0", release, StringComparison.Ordinal);
+        Assert.Contains("git merge-base --is-ancestor $env:GITHUB_SHA FETCH_HEAD", release, StringComparison.Ordinal);
+        Assert.Contains("Directory.Build.props", release, StringComparison.Ordinal);
+        Assert.True(
+            release.IndexOf("Check that the tag releases main", StringComparison.Ordinal)
+                < release.IndexOf("Restore dependencies", StringComparison.Ordinal),
+            "The tag check must run before anything is built.");
+    }
+
+    [Fact]
     public void NativeLibrariesTravelInsideTheExecutableBecauseTheReleaseShipsNothingElse()
     {
         var project = ReadRepositoryFile(Path.Combine("src", "BraviaTheatre.UI", "BraviaTheatre.UI.csproj"));

@@ -115,8 +115,21 @@ public static class CommandBuilder
 
     public static bool ParseExecResponse(ReadOnlySpan<byte> raw)
     {
-        // Sony firmware reports a successful command either with field 1=true
-        // or with an empty protobuf response on an otherwise successful RPC.
-        return raw.IsEmpty || (raw.Length == 2 && raw[0] == 0x08 && raw[1] == 0x01);
+        // Sony firmware reports a successful command either with field 1=true or with an empty
+        // protobuf response on an otherwise successful RPC. Other fields may follow field 1; only
+        // an exact two-byte reply used to count, so a success with metadata read as a rejection.
+        if (raw.IsEmpty) return true;
+
+        var pos = 0;
+        while (pos < raw.Length)
+        {
+            if (!ProtobufWireCodec.TryDecodeField(raw, pos, out var field, out var next) || field is null)
+                return false;
+            if (field.FieldNumber == 1)
+                return field.WireType == 0 && field.VarintValue != 0;
+            pos = next;
+        }
+
+        return false;
     }
 }

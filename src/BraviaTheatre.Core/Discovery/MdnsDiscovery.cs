@@ -18,6 +18,13 @@ public sealed record DiscoveredDevice(string Host, int Port, string Name);
 
 internal sealed record ActiveIPv4Interface(IPAddress Address, IPAddress Mask, bool ScanEligible);
 
+/// <summary>How far a subnet sweep got before it ended.</summary>
+internal sealed class SweepProgress
+{
+    /// <summary>Every candidate before this index was probed to the end.</summary>
+    public int FirstUnfinished { get; set; }
+}
+
 public static class MdnsDiscovery
 {
     private static readonly IPAddress MulticastAddress = IPAddress.Parse("224.0.0.251");
@@ -35,10 +42,21 @@ public static class MdnsDiscovery
         Marshallers.Create(static bytes => bytes, static bytes => bytes),
         Marshallers.Create(static bytes => bytes, static bytes => bytes));
 
+    public static Task<DiscoveredDevice?> DiscoverAsync(
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default) =>
+        DiscoverAsync(timeout, new SubnetProbePlan(), cancellationToken);
+
+    /// <param name="probePlan">
+    /// Where and how often the subnet may be swept; keep one for the life of the app so a sweep
+    /// continues where the last one stopped.
+    /// </param>
     public static async Task<DiscoveredDevice?> DiscoverAsync(
         TimeSpan timeout,
+        SubnetProbePlan probePlan,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(probePlan);
         if (timeout <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(timeout), "Discovery timeout must be positive.");
 
@@ -95,11 +113,13 @@ public static class MdnsDiscovery
                 }
             }
 
-            var scanInterfaces = interfaces.Where(static network => network.ScanEligible).ToArray();
-            if (scanInterfaces.Length > 0)
+            var scanInterfaces = probePlan.SelectInterfaces(
+                interfaces.Where(static network => network.ScanEligible));
+            if (scanInterfaces.Count > 0)
             {
                 tasks.Add(DelayedSubnetProbeAsync(
                     scanInterfaces,
+                    probePlan,
                     TimeSpan.FromMilliseconds(900),
                     timeoutCts.Token));
             }
@@ -146,25 +166,38 @@ public static class MdnsDiscovery
 
     private static async Task<DiscoveredDevice?> DelayedSubnetProbeAsync(
         IReadOnlyCollection<ActiveIPv4Interface> interfaces,
+        SubnetProbePlan probePlan,
         TimeSpan delay,
         CancellationToken cancellationToken)
     {
         await Task.Delay(delay, cancellationToken);
 
-        var candidates = interfaces
+        var candidates = probePlan.BeginSweep(interfaces
             .SelectMany(network => BuildSubnetCandidates(
                 network.Address,
                 network.Mask,
                 MaxSubnetCandidatesPerInterface))
             .Distinct()
-            .ToArray();
+            .ToArray());
 
-        return await ProbeCandidatesAsync(
-            candidates,
-            DefaultControlPort,
-            MaxConcurrentProbes,
-            ProbeControlDeviceAsync,
-            cancellationToken);
+        var progress = new SweepProgress();
+        DiscoveredDevice? found = null;
+        try
+        {
+            found = await ProbeCandidatesAsync(
+                candidates,
+                DefaultControlPort,
+                MaxConcurrentProbes,
+                ProbeControlDeviceAsync,
+                cancellationToken,
+                progress);
+            return found;
+        }
+        finally
+        {
+            // Discovery's time budget usually ends the sweep, so record its progress either way.
+            probePlan.EndSweep(candidates.Count, progress.FirstUnfinished, found != null);
+        }
     }
 
     internal static async Task<DiscoveredDevice?> ProbeCandidatesAsync(
@@ -172,7 +205,8 @@ public static class MdnsDiscovery
         int port,
         int maxConcurrency,
         Func<IPAddress, int, CancellationToken, Task<bool>> probeAsync,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SweepProgress? progress = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         ArgumentNullException.ThrowIfNull(probeAsync);
@@ -184,6 +218,7 @@ public static class MdnsDiscovery
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var nextIndex = -1;
         var resultLock = new object();
+        var finished = new bool[candidates.Count];
         DiscoveredDevice? found = null;
 
         async Task WorkerAsync()
@@ -194,7 +229,9 @@ public static class MdnsDiscovery
                 if (index >= candidates.Count) return;
 
                 var address = candidates[index];
-                if (!await probeAsync(address, port, linkedCts.Token)) continue;
+                var answered = await probeAsync(address, port, linkedCts.Token);
+                finished[index] = true;
+                if (!answered) continue;
 
                 lock (resultLock)
                 {
@@ -216,6 +253,16 @@ public static class MdnsDiscovery
         catch (OperationCanceledException) when (found != null)
         {
             // The winning probe cancels sibling workers.
+        }
+        finally
+        {
+            // Every worker has stopped, so the flags are final. Probes run out of order, so a later
+            // sweep resumes at the first one that did not finish.
+            if (progress != null)
+            {
+                var firstUnfinished = Array.IndexOf(finished, false);
+                progress.FirstUnfinished = firstUnfinished < 0 ? finished.Length : firstUnfinished;
+            }
         }
 
         cancellationToken.ThrowIfCancellationRequested();

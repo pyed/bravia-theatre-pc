@@ -37,6 +37,7 @@ public partial class FlyoutWindow : Window
     private Action? _afterCloseAction;
     private bool _isUpdatingUi;
     private bool _isDraggingSlider;
+    private bool _isDraggingRearSlider;
     private bool _allowClose;
     private bool _bassControlsEnabled;
     private string _bassLevel = "mid";
@@ -73,6 +74,10 @@ public partial class FlyoutWindow : Window
         // A drag can end without a mouse-up reaching the slider, for example when the flyout
         // hides mid-drag. Left set, the slider would stop following the soundbar's volume.
         SliderVolume.LostMouseCapture += (_, _) => _isDraggingSlider = false;
+        // The rear level needs the same guard: a keepalive snapshot moved its thumb mid-drag.
+        SliderRear.PreviewMouseDown += (_, _) => _isDraggingRearSlider = true;
+        SliderRear.PreviewMouseUp += (_, _) => _isDraggingRearSlider = false;
+        SliderRear.LostMouseCapture += (_, _) => _isDraggingRearSlider = false;
     }
 
     public void ApplySettings(AppSettings settings)
@@ -302,8 +307,11 @@ public partial class FlyoutWindow : Window
             IconSpeaker.Data = state.Mute ? SpeakerMutedGeometry : SpeakerUnmutedGeometry;
             UpdateBassStepper(state.Bass, connectedAndPowered);
 
-            SliderRear.Value = state.RearLevel;
-            TxtRearValue.Text = state.RearLevel > 0 ? $"+{state.RearLevel}" : state.RearLevel.ToString();
+            if (!_isDraggingRearSlider)
+            {
+                SliderRear.Value = state.RearLevel;
+                TxtRearValue.Text = state.RearLevel > 0 ? $"+{state.RearLevel}" : state.RearLevel.ToString();
+            }
             SliderRear.IsEnabled = connectedAndPowered;
 
             BtnSoundField.IsChecked = state.SoundField;

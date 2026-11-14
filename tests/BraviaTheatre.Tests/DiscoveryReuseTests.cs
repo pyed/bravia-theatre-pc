@@ -106,6 +106,38 @@ public class DiscoveryReuseTests
         }
     }
 
+    [Fact]
+    public async Task ConnectingToADiscoveredSoundbarRemembersItsNetworkForLaterSweeps()
+    {
+        var client = new FakeBraviaClient();
+        var plan = new SubnetProbePlan(
+            null,
+            TimeProvider.System,
+            () => [new ActiveIPv4Interface(System.Net.IPAddress.Parse("192.0.2.5"), System.Net.IPAddress.Parse("255.255.255.0"), true)]);
+        var learned = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        plan.SoundbarNetworkChanged += network => learned.TrySetResult(network);
+        var engine = new BraviaEngine(
+            new SonyCredentials(),
+            null,
+            55051,
+            (_, _, _) => client,
+            static (_, ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct),
+            discoverAsync: (_, _) => Task.FromResult<DiscoveredDevice?>(Soundbar))
+        {
+            SubnetProbes = plan
+        };
+
+        try
+        {
+            engine.Start();
+            Assert.Equal("192.0.2.0/24", await learned.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            await engine.StopAsync();
+        }
+    }
+
     // The first keepalive comes back empty even after a session renewal, which ends the
     // connection and makes the engine reconnect.
     private static FakeBraviaClient DropsAfterFirstKeepalive()

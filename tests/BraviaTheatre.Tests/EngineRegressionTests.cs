@@ -765,10 +765,81 @@ public class EngineRegressionTests
         Assert.False(await engine.TogglePowerAsync());
     }
 
-    [Fact]
-    public async Task RejectedCommandTearsDownConnectionAndClearsOptimisticState()
+    // A model without a control (rear speakers, an input) refuses its command, either with a false
+    // result or with InvalidArgument. That used to end the connection each time.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RejectedCommandKeepsTheConnectionAndRestoresTheDeviceState(bool rejectedWithStatus)
     {
-        var client = new FakeBraviaClient { CommandResult = false };
+        var client = new FakeBraviaClient
+        {
+            CommandResult = rejectedWithStatus,
+            CommandHandler = rejectedWithStatus
+                ? static _ => throw new RpcException(new Status(StatusCode.InvalidArgument, "Unsupported."))
+                : null
+        };
+        var powered = NewSignal();
+        var restored = NewSignal();
+        var sawOptimistic = 0;
+        var engine = new BraviaEngine(
+            new SonyCredentials(),
+            "test-host",
+            55051,
+            (_, _, _) => client,
+            static (_, ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct));
+
+        engine.StateChanged += state =>
+        {
+            if (!state.Connected) return;
+            if (state.Power) powered.TrySetResult(true);
+            if (state.Volume == 42) Interlocked.Exchange(ref sawOptimistic, 1);
+            else if (state.Volume == 10 && Volatile.Read(ref sawOptimistic) == 1) restored.TrySetResult(true);
+        };
+
+        try
+        {
+            engine.Start();
+            await powered.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+
+            Assert.True(await engine.SetVolumeAsync(42));
+            await restored.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
+
+            Assert.True(engine.CurrentState.Connected);
+            Assert.Equal(10, engine.CurrentState.Volume);
+            Assert.False(client.Disposed.Task.IsCompleted);
+            Assert.Equal(1, client.SessionInitializations);
+
+            // The same connection keeps taking commands.
+            client.CommandHandler = null;
+            client.CommandResult = true;
+            Assert.True(await engine.SetVolumeAsync(30));
+            using var cancellation = new CancellationTokenSource(TestTimeout);
+            while (client.Commands.Count < 2)
+                await Task.Delay(10, cancellation.Token);
+            Assert.Equal(1, client.SessionInitializations);
+        }
+        finally
+        {
+            await engine.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task FailedCommandWhoseStateCannotBeReadAgainReconnects()
+    {
+        var stateCalls = 0;
+        var client = new FakeBraviaClient
+        {
+            CommandResult = false,
+            StateHandler = (_, ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                return Task.FromResult(Interlocked.Increment(ref stateCalls) == 1
+                    ? new Dictionary<string, object?> { ["power"] = true, ["volume"] = 10 }
+                    : new Dictionary<string, object?>());
+            }
+        };
         var powered = NewSignal();
         var disconnected = NewSignal();
         var sawConnected = 0;
@@ -798,7 +869,6 @@ public class EngineRegressionTests
             await powered.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
 
             Assert.True(await engine.SetVolumeAsync(42));
-            await client.CommandReceived.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
             await disconnected.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
             await client.Disposed.Task.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
 

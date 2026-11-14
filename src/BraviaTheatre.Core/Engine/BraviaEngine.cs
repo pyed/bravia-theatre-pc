@@ -16,6 +16,12 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
 {
     private readonly record struct QueuedCommand(long Generation, string Path, object Value);
     private static readonly TimeSpan CredentialRenewalWindow = TimeSpan.FromMinutes(5);
+
+    // A renewal that fails for a reason other than the account (Sony's cloud is down, or returns
+    // something unusable) used to be retried on every reconnect attempt, every 11 to 66 s for as
+    // long as the failure lasted. Renewals get their own, longer backoff instead.
+    internal static readonly TimeSpan FirstRenewalRetryDelay = TimeSpan.FromMinutes(1);
+    internal static readonly TimeSpan LongestRenewalRetryDelay = TimeSpan.FromMinutes(15);
     internal const string DefaultDeviceName = "BRAVIA Theatre";
 
     // The soundbar ends a local session about an hour after the handshake and then rejects every
@@ -104,6 +110,9 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
     private SonyCredentials? _deviceAssociationRequiredCredentials;
     private SonyCredentials? _refreshSuppressedCredentials;
     private SonyCredentials? _proactiveRenewalSuppressedCredentials;
+    private SonyCredentials? _renewalBackoffCredentials;
+    private long? _renewalBackoffStarted;
+    private TimeSpan _renewalRetryDelay = FirstRenewalRetryDelay;
 
     private readonly Channel<QueuedCommand> _cmdChannel = Channel.CreateUnbounded<QueuedCommand>(
         new UnboundedChannelOptions
@@ -128,6 +137,12 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
 
     public event Action<SoundbarState>? StateChanged;
     public Action<string, DiagnosticLevel>? LogAction { get; set; }
+
+    /// <summary>
+    /// Where and how often discovery may sweep the subnet. Pass the app's one instance, so what it
+    /// learned (the soundbar's network, how far the last sweep got) outlives this engine.
+    /// </summary>
+    public SubnetProbePlan SubnetProbes { get; init; } = new();
 
     public SoundbarState CurrentState
     {
@@ -169,7 +184,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         _clientFactory = clientFactory;
         _delayAsync = delayAsync;
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _discoverAsync = discoverAsync ?? MdnsDiscovery.DiscoverAsync;
+        _discoverAsync = discoverAsync ?? ((timeout, ct) => MdnsDiscovery.DiscoverAsync(timeout, SubnetProbes, ct));
     }
 
     internal BraviaEngine(
@@ -189,7 +204,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         _clientFactory = clientFactory;
         _delayAsync = delayAsync;
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _discoverAsync = discoverAsync ?? MdnsDiscovery.DiscoverAsync;
+        _discoverAsync = discoverAsync ?? ((timeout, ct) => MdnsDiscovery.DiscoverAsync(timeout, SubnetProbes, ct));
     }
 
     private void Log(string msg, DiagnosticLevel level)
@@ -207,9 +222,45 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
     private SonyCredentials CurrentCredentials =>
         _credentialLifecycle?.CurrentCredentials ?? _credentials;
 
-    private static bool IsNearingExpiry(SonyCredentials credentials) =>
+    private bool IsNearingExpiry(SonyCredentials credentials) =>
         credentials.SessionKeysExpiresAtUtc is { } expiresAt
-        && expiresAt <= DateTimeOffset.UtcNow + CredentialRenewalWindow;
+        && expiresAt <= _timeProvider.GetUtcNow() + CredentialRenewalWindow;
+
+    /// <summary>False while the backoff after a failed renewal runs.</summary>
+    private bool IsRenewalDue()
+    {
+        if (_renewalBackoffStarted is not { } started) return true;
+
+        // Credentials that replaced the failed ones (a new sign-in, not Sony's rotated-token
+        // checkpoint) start without the old failures.
+        var current = CurrentCredentials;
+        if (!ReferenceEquals(current, _renewalBackoffCredentials)
+            && !(_credentialLifecycle?.IsLocalKeyRefreshPending(current) ?? false))
+        {
+            ResetRenewalBackoff();
+            return true;
+        }
+
+        return _timeProvider.GetElapsedTime(started) >= _renewalRetryDelay;
+    }
+
+    private void StartRenewalBackoff(SonyCredentials failed)
+    {
+        if (_renewalBackoffStarted.HasValue)
+            _renewalRetryDelay = _renewalRetryDelay * 2 > LongestRenewalRetryDelay
+                ? LongestRenewalRetryDelay
+                : _renewalRetryDelay * 2;
+        _renewalBackoffCredentials = failed;
+        _renewalBackoffStarted = _timeProvider.GetTimestamp();
+        Log($"[Credential renewal] The next renewal waits {_renewalRetryDelay.TotalMinutes:0} minute(s).", DiagnosticLevel.Critical);
+    }
+
+    private void ResetRenewalBackoff()
+    {
+        _renewalBackoffCredentials = null;
+        _renewalBackoffStarted = null;
+        _renewalRetryDelay = FirstRenewalRetryDelay;
+    }
 
     internal static string DescribeFailure(Exception error)
     {
@@ -247,6 +298,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         {
             credentials = renewal.Credentials;
             authRequired = false;
+            ResetRenewalBackoff();
             _authenticationRequiredCredentials = null;
             _deviceAssociationRequiredCredentials = null;
             _refreshSuppressedCredentials = null;
@@ -287,10 +339,12 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
             case CredentialRenewalStatus.TransientFailure:
                 authRequired = false;
                 Log("Sony credential renewal is temporarily unavailable; retrying without requiring sign-in.", DiagnosticLevel.Info);
+                StartRenewalBackoff(credentials);
                 return !authenticatedHandshakeRejected;
             default:
                 authRequired = false;
                 Log("Sony credential renewal failed; retrying without requiring sign-in.", DiagnosticLevel.Critical);
+                StartRenewalBackoff(credentials);
                 return !authenticatedHandshakeRejected;
         }
     }
@@ -419,6 +473,14 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 }
                 else if (_credentialLifecycle != null
                     && IsNearingExpiry(credentials)
+                    && !ReferenceEquals(credentials, _proactiveRenewalSuppressedCredentials)
+                    && !IsRenewalDue())
+                {
+                    // The keys still work until they expire; the keepalive renews once the backoff ends.
+                    Log("Local credentials nearing expiry; the last renewal failed, so connecting with them until the next attempt.", DiagnosticLevel.Verbose);
+                }
+                else if (_credentialLifecycle != null
+                    && IsNearingExpiry(credentials)
                     && !ReferenceEquals(credentials, _proactiveRenewalSuppressedCredentials))
                 {
                     Log("[Credential renewal] Trigger=proactive; local credentials nearing expiry; refreshing before authenticated connect.", DiagnosticLevel.Critical);
@@ -510,6 +572,13 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                             break;
                         }
 
+                        if (!IsRenewalDue())
+                        {
+                            authRequired = false;
+                            Log("Authenticated handshake rejected; the last renewal failed, so the next one waits for its backoff.", DiagnosticLevel.Info);
+                            break;
+                        }
+
                         Log("[Credential renewal] Trigger=reactive; authenticated handshake rejected; attempting one credential refresh.", DiagnosticLevel.Critical);
                         var renewal = await _credentialLifecycle.RefreshAsync(credentials, connectionCts.Token);
                         if (!TryUseRenewalResult(
@@ -560,7 +629,10 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     Log("Full security handshake completed (ConfirmSignin + ConfirmKeys).", DiagnosticLevel.Info);
                     sessionEstablished = true;
                     if (string.IsNullOrEmpty(_configuredHost))
+                    {
                         _lastDiscovered = new DiscoveredDevice(host, port, deviceName);
+                        RecordSoundbarNetwork(host);
+                    }
 
                     ActivateConnection(connectionGeneration, deviceName);
 
@@ -578,7 +650,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     connectionTasks.Add(initialSnapshotTask);
 
                     // Start command drain loop and keepalive loop
-                    var cmdDrainTask = CommandDrainLoopAsync(client, connectionGeneration, connectionCts.Token);
+                    var cmdDrainTask = CommandDrainLoopAsync(client, deviceName, connectionGeneration, connectionCts.Token);
                     connectionTasks.Add(cmdDrainTask);
 
                     var keepAliveTask = KeepAlivePollLoopAsync(
@@ -621,8 +693,12 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                     Log($"Connection cancellation warning: {DescribeFailure(ex)}", DiagnosticLevel.Info);
                 }
 
-                SetDisconnectedState(connectionGeneration, authRequired,
-                    ReferenceEquals(CurrentCredentials, _deviceAssociationRequiredCredentials));
+                // A renewal on the open connection that finds sign-in needed records it in the
+                // field, not in this loop's flag; without it the sign-in prompt waited one backoff.
+                var currentCredentials = CurrentCredentials;
+                SetDisconnectedState(connectionGeneration,
+                    authRequired || ReferenceEquals(currentCredentials, _authenticationRequiredCredentials),
+                    ReferenceEquals(currentCredentials, _deviceAssociationRequiredCredentials));
 
                 try
                 {
@@ -646,6 +722,19 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 await _delayAsync(TimeSpan.FromSeconds(backoffSec), _cts.Token);
                 backoffSec = Math.Min(backoffSec * 2, 60);
             }
+        }
+    }
+
+    private void RecordSoundbarNetwork(string host)
+    {
+        try
+        {
+            SubnetProbes.RecordSoundbar(host);
+        }
+        catch (Exception ex)
+        {
+            // Remembering the network only narrows later sweeps; it must not cost the connection.
+            Log($"Could not record the soundbar's network: {DescribeFailure(ex)}", DiagnosticLevel.Info);
         }
     }
 
@@ -875,14 +964,14 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task CommandDrainLoopAsync(IBraviaClient client, long connectionGeneration, CancellationToken ct)
+    private async Task CommandDrainLoopAsync(IBraviaClient client, string deviceName, long connectionGeneration, CancellationToken ct)
     {
         var activeReaders = Interlocked.Increment(ref _activeCommandDrainReaders);
         UpdateMaximum(ref _maxConcurrentCommandDrainReaders, activeReaders);
 
         try
         {
-            await CommandDrainCoreAsync(client, connectionGeneration, ct);
+            await CommandDrainCoreAsync(client, deviceName, connectionGeneration, ct);
         }
         finally
         {
@@ -890,7 +979,7 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task CommandDrainCoreAsync(IBraviaClient client, long connectionGeneration, CancellationToken ct)
+    private async Task CommandDrainCoreAsync(IBraviaClient client, string deviceName, long connectionGeneration, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
@@ -947,17 +1036,27 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                         if (!succeeded)
                         {
                             Log($"Command '{path}' was rejected by the device.", DiagnosticLevel.Info);
-                            return;
+                            if (!await RestoreDeviceStateAsync(client, deviceName, connectionGeneration, ct))
+                                return;
                         }
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested)
                     {
                         break;
                     }
+                    catch (RpcException ex) when (BraviaClient.IsUnsupportedPathStatus(ex.StatusCode))
+                    {
+                        // How the soundbar answers a control this model lacks, such as the rear level
+                        // without rear speakers or an input it does not have.
+                        Log($"Command '{path}' was rejected by the device ({ex.StatusCode}).", DiagnosticLevel.Info);
+                        if (!await RestoreDeviceStateAsync(client, deviceName, connectionGeneration, ct))
+                            return;
+                    }
                     catch (Exception ex)
                     {
                         Log($"Command '{path}' exec error: {DescribeFailure(ex)}", DiagnosticLevel.Critical);
-                        return;
+                        if (!await RestoreDeviceStateAsync(client, deviceName, connectionGeneration, ct))
+                            return;
                     }
                 }
             }
@@ -970,6 +1069,43 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 Log($"Command drain error: {DescribeFailure(ex)}", DiagnosticLevel.Critical);
                 return;
             }
+        }
+    }
+
+    // A command that fails leaves its optimistic change on screen. It used to end the connection
+    // (Disconnected, a backoff, a new handshake) every time, also when the soundbar merely lacked the
+    // control. Reading the device's state again replaces the optimistic change; only a failed read
+    // means the connection itself is in trouble.
+    private async Task<bool> RestoreDeviceStateAsync(
+        IBraviaClient client,
+        string deviceName,
+        long connectionGeneration,
+        CancellationToken ct)
+    {
+        try
+        {
+            var baselineRevision = CaptureSnapshotRevision(connectionGeneration);
+            if (baselineRevision == null) return false;
+
+            var snapshot = await client.GetInitialStatesAsync(MonitoredPaths, ct);
+            ct.ThrowIfCancellationRequested();
+            if (snapshot.Count == 0)
+            {
+                Log("The device returned no state after a failed command; reconnecting.", DiagnosticLevel.Critical);
+                return false;
+            }
+
+            ApplySnapshotForConnection(snapshot, deviceName, connectionGeneration, baselineRevision.Value);
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Log($"Reading the device state after a failed command failed: {DescribeFailure(ex)}; reconnecting.", DiagnosticLevel.Critical);
+            return false;
         }
     }
 
@@ -1001,7 +1137,8 @@ public sealed class BraviaEngine : IDisposable, IAsyncDisposable
                 if (!suppressCredentialRenewal
                     && _credentialLifecycle != null
                     && IsNearingExpiry(credentials)
-                    && !ReferenceEquals(credentials, _proactiveRenewalSuppressedCredentials))
+                    && !ReferenceEquals(credentials, _proactiveRenewalSuppressedCredentials)
+                    && IsRenewalDue())
                 {
                     switch (await RenewCredentialsInPlaceAsync(_credentialLifecycle, client, credentials, notifyStream, ct))
                     {
