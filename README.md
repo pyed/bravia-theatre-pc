@@ -68,7 +68,7 @@ Keep the executable at a stable path so Windows can retain your tray-icon placem
 Requirements:
 
 - Windows 10 or Windows 11, 64-bit
-- [.NET SDK 10.0.302](https://dotnet.microsoft.com/download/dotnet/10.0) or a compatible patch selected by `global.json`
+- [.NET SDK 10.0.404](https://dotnet.microsoft.com/download/dotnet/10.0) or a later 10.0.4xx patch, as `global.json` selects
 - Microsoft Edge WebView2 Runtime for the embedded sign-in experience
 
 ```powershell

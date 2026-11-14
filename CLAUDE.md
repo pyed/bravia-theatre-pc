@@ -47,8 +47,11 @@ tests/BraviaTheatre.Tests/   xUnit v3 (VSTest mode); references both projects
 
 ## Commands
 
-Run from the repository root. `global.json` pins SDK 10.0.302 with `rollForward: latestPatch`,
-so only a 10.0.3xx SDK satisfies it.
+Run from the repository root. `global.json` pins SDK 10.0.404 with `rollForward: latestPatch`,
+so only a 10.0.4xx SDK satisfies it. Both workflows install the SDK from `global.json`, and
+Dependabot updates it (`dotnet-sdk`). The SDK decides the .NET runtime bundled into the
+self-contained release, so a stale pin ships a runtime without its security fixes (HANDOFF section
+12, P4-7); a new feature band means moving the pin by hand.
 
 ```powershell
 dotnet restore BraviaTheatrePC.sln
