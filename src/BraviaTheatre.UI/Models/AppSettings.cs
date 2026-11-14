@@ -34,9 +34,6 @@ public sealed class AppSettings
     public string? SoundbarNetwork { get; set; }
     public string LogLevel { get; set; } = "Critical";
 
-    // Empty turns TV follow off. A Samsung TV at this host turning on turns the soundbar on.
-    public string? TvHost { get; set; } = "";
-
     public static string SettingsFilePath => Path.Combine(App.GetAppDataDir(), "settings.json");
 
     public AppSettings Copy() => (AppSettings)MemberwiseClone();
@@ -73,7 +70,6 @@ public sealed class AppSettings
     {
         error = null;
         StaticHost = StaticHost?.Trim() ?? "";
-        TvHost = TvHost?.Trim() ?? "";
         if (StaticPort is < 1 or > 65535)
         {
             error = "The connection port must be between 1 and 65535.";

@@ -27,6 +27,9 @@ A Sony account sign-in (OAuth with PKCE in an embedded WebView2) mints device-lo
 after that the app talks to the soundbar directly over cleartext HTTP/2 gRPC on the LAN
 (port 55051), signing requests with HMAC-SHA256.
 
+**Scope: the soundbar only.** The owner does not want TV-specific features in this project, such as
+turning the soundbar on when a TV turns on. Do not build them, and do not merge `feature/tv-follow`.
+
 ```text
 src/BraviaTheatre.Core/      no UI dependencies
   Auth/       SonyOAuth (cloud calls), SonyCredentialLifecycle (serialized renewal), SonyCredentials
@@ -37,7 +40,6 @@ src/BraviaTheatre.Core/      no UI dependencies
               NotifyStreamGate (notify stream across session renewals), ControlEndpoint (static host)
   Wire/       bounded protobuf codecs for Sony's hand-framed messages, HMAC signing;
               StateValueCodec decodes state values for snapshots and notifications alike
-  Tv/         TV follow: SamsungTvProbe, TvPowerFollower (turn the soundbar on with the TV)
   Models/     SoundbarState, CodecTaxonomy, control ranges
 src/BraviaTheatre.UI/        WPF app; assembly and exe name BraviaTheatrePC
   App.xaml.cs  startup, single instance, logging, unhandled-error handling, engine lifetime

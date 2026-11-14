@@ -23,7 +23,6 @@ Built with C# and .NET 10, the application communicates directly with the device
 - Connection-scoped workers, health polling, command coalescing, stale-command rejection, and clean reconnect/teardown behavior.
 - Native Win32 tray integration with Explorer restart recovery, a supported Taskbar Settings shortcut and one-time visibility guidance, taskbar-aware multi-monitor placement, reduced-motion-aware slide animations, click-to-toggle behavior, and show-only single-instance activation.
 - Atomic settings storage, Windows startup integration, configurable logging, and optional static host/port override.
-- Optional TV follow for Samsung TVs: when the TV turns on, the soundbar is turned on too, for sets that switch the soundbar off over HDMI-CEC but not back on.
 
 Default shortcuts are:
 
@@ -109,7 +108,6 @@ Settings are stored atomically under `%LOCALAPPDATA%\BraviaTheatrePC\settings.js
 - Optional rear-speaker control using Sony's relative `-10` to `+10` range (`0` is neutral)
 - Global shortcuts
 - Automatic discovery or a static host/port override
-- TV follow: a Samsung TV's IP address. The app reads the TV's power state from its local device-info endpoint (`http://<tv>:8001/api/v2/`, no pairing) every two seconds and turns the soundbar on when the TV goes from off to on. It never turns the soundbar off, and it does nothing when the app starts with the TV already on or when the soundbar is switched off while the TV stays on
 - Critical, Info, or Verbose logging
 
 The settings file also records the network the soundbar was last found on (`SoundbarNetwork`), which limits the subnet probe to that network; it updates itself when the soundbar is found elsewhere. If the soundbar moves to a new network where mDNS does not reach it, set a static host. A settings file that cannot be read is kept as `settings.json.bad` and the defaults are used.

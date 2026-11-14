@@ -20,7 +20,6 @@ Last updated: 2026-11-14
 | Daily credential renewal on the open connection (P1-5) | Verified on the device: every renewal in the logs since 2026-10-27 completed in place (section 7) |
 | Flyout three times too wide after a display scale change; tray menu dead after Alt+F4 | Fixed in v2.3.3 (section 10) |
 | Flyout fully transparent, no edge, after days of sleep and resume | Fixed in v2.3.4 (`01f7463`), which runs on the reporter's PC (section 11) |
-| Soundbar stays off when the Samsung TV turns on | TV follow merged from `feature/tv-follow` on 2026-11-14; needs a device test (section 13) |
 | v2.2.8 release | Published 2026-10-13 22:56 UTC with all five assets; CI on `main` green |
 | Full audit with prioritized fix proposal | Done 2026-10-14 (section 4) |
 | Overnight work, 2026-10-14 | Released in v2.3.0; open checks in section 7 |
@@ -30,9 +29,9 @@ Last updated: 2026-11-14
 | v2.3.2 release | Published 2026-10-14 16:46 (13:46 UTC) with all five assets; both executables passed the release run's startup check; CI on `main` green |
 | v2.3.4 release | Published 2026-11-06 02:26 (2026-11-05 23:26 UTC) with all five assets on the run's second attempt; both executables passed the startup check; CI on `main` green (section 11) |
 | Second full audit (source, release pipeline, repository) | Done 2026-11-14 on v2.3.4 by reading (section 12) |
-| Fixes for the second audit's findings | On branch `claude/gifted-hopper-4e650w` (2026-11-14), not merged or released; everything except P4-10, and two settings for the owner. CI run 68 green: 597 of 597 tests on Windows (section 12, "Fixes") |
+| Fixes for the second audit's findings | On branch `claude/gifted-hopper-4e650w` (2026-11-14), not merged or released; everything except P4-10, and two settings for the owner. CI on the final tree in section 12, "Fixes" |
 | Self-contained download bundles .NET runtime 10.0.10 (P4-7) | Fixed on the branch: SDK 10.0.404, runtime 10.0.15; reaches users only with the next release |
-| `feature/tv-follow` (turn the soundbar on with a Samsung TV) | Merged into the branch; a device test is still owed (section 13) |
+| `feature/tv-follow` (turn the soundbar on with a Samsung TV) | Not wanted: the owner does not want TV-specific features in this project (2026-11-14). It was merged into the branch without being asked for, then reverted; do not merge it. Closing the branch is left to the owner |
 
 Released as **v2.3.2** on 2026-10-14: the framework-dependent download starts again (it never had
 since ReadyToRun was enabled), CI restores and publishes exactly as the release does, and both
@@ -311,7 +310,7 @@ tests, CI with pinned action SHAs, gitleaks, Dependabot version updates, and a c
   property, and `dotnet format` takes no `-p`), restore, `dotnet format --verify-no-changes` and the
   `-warnaserror` Release build all run, XAML included. WPF tests cannot run on Linux, but a scratch
   `net10.0` test project named `BraviaTheatre.Tests` (so Core's `InternalsVisibleTo` applies) that
-  links the test files without WPF or UI references runs the Core tests: 391 of them on 2026-11-14.
+  links the test files without WPF or UI references runs the Core tests: 367 of them on 2026-11-14.
   Extract the copy with fresh timestamps (`tar -m`): with the repository's old mtimes MSBuild reuses
   a stale Core build. PowerShell for testing workflow scripts: `dotnet tool install --tool-path
   <dir> PowerShell --version 7.6.0` (7.7.0 needs a newer runtime). `claude/**` branches do not run
@@ -866,14 +865,16 @@ needs merging), then P2-12 to P2-14; most other rows are under an hour each.
 
 At the reporter's request every finding above was fixed on the branch, except P4-10 and two settings
 only the owner can change. Commits: `b8acc7f` (SDK and dependencies), `7d32dd0` (discovery and
-engine), `5c1e6f5` (UI), `b3d3812` (merge of `feature/tv-follow`), `575e080` (release guard, policy).
+engine), `5c1e6f5` (UI), `575e080` (release guard, policy). `b3d3812` merged `feature/tv-follow`
+without the owner asking for it; the commit after `6ae4ad3` reverts it (see P4-11).
 
 How it was checked, overall: in the Linux container (section 5) `dotnet format` is clean, the
-Release build with `-warnaserror` has no warnings, and the 391 Core tests pass, five runs in a row.
+Release build with `-warnaserror` has no warnings, and the 367 Core tests pass, five runs in a row.
 For every engine and discovery fix, reverting it in a scratch copy made its new test fail (15
-mutations, all caught). CI on the branch (`workflow_dispatch`, runs 67 and 68): SDK 10.0.404
-restore, format, build with 0 warnings, 597 of 597 tests on Windows, NuGet audit clean, both
-publishes containing only the executable, both executables still running after 20 s, gitleaks clean.
+mutations, all caught). CI on the branch (`workflow_dispatch`): run 67 on `7d32dd0` and run 68 on
+`575e080` passed (run 68's tree still had TV follow); the run on the final tree is pending: SDK
+10.0.404 restore, format, the build, the tests on Windows, NuGet audit, both publishes containing
+only the executable, both executables still running after 20 s, gitleaks.
 Not exercised on a real desktop or against the soundbar: everything below marked "compile only".
 
 | ID | What changed | Verified |
@@ -895,7 +896,7 @@ Not exercised on a real desktop or against the soundbar: everything below marked
 | P3-11 | Credential expiry uses the engine's `TimeProvider`. | `NearExpiryIsJudgedByTheEnginesClock`. |
 | P4-9 | `SECURITY.md` supports the latest release instead of naming a version line. | Read. |
 | P4-10 | **Open.** Needs a one-off capture on the reporter's device (app stopped) to learn what the reply token signs. Reading the reference implementation was not possible: adding `steamEngineer/pybravia-connect` to the session was declined. | |
-| P4-11 | `feature/tv-follow` merged (`b3d3812`), its section renumbered to 13. Its `EngineSetPowerSendsOnlyWhenTheStateDiffers` raced the first snapshot and failed on every isolated run here; it now waits for the snapshot. **Still open:** the device test in section 13, and deleting the four merged remote branches (`claude/practical-mayer-b95xzo`, `codex/recover-stale-sony-association`, `fix/ci-hardening`, `perf/lightweight-publish`) and `feature/tv-follow` once the branch is merged. That writes to other branches, so it was left to the owner. | Core tests 24 of 24, eight runs; CI run 68. |
+| P4-11 | **Not merged, by the owner's decision (2026-11-14): no TV-specific features in this project.** The branch had been merged here (`b3d3812`) on the audit's "test and merge it, or close it" without the owner asking; the merge is reverted, and CLAUDE.md now records the scope. Closing `feature/tv-follow`, and deleting the four merged remote branches (`claude/practical-mayer-b95xzo`, `codex/recover-stale-sony-association`, `fix/ci-hardening`, `perf/lightweight-publish`), is left to the owner: it writes to other branches. | The revert leaves the code exactly as before the merge plus `575e080` (`git diff` against a tree rebuilt without the merge is empty). |
 | P4-12 | `release.yml` checks out full history and fails before building unless the tag's commit is on `main` and the tag equals `<Version>` (a prerelease tag may preview it). **Still open:** a required reviewer on the `release` environment, a repository setting. | Tested with PowerShell 7.6 against a scratch remote (on main and matching passes; off main, or a mismatched version, fails); `ReleaseOnlyPublishesACommitOnMainAtItsDeclaredVersion`. Not run as a real release. |
 
 Smaller observations: the sign-in prompt is now published with the disconnect
@@ -908,8 +909,7 @@ this session), so the 8.29.0 pin stays. An advisory says versions before 8.30.1 
 template-injection flaw; whether CI's use is affected was not checked.
 
 Next steps: review and merge the branch (or open a PR from it), release, then on the reporter's PC
-look for "Remembered the soundbar's network" at Info after the first connect, and run the TV follow
-test from section 13.
+look for "Remembered the soundbar's network" at Info after the first connect.
 
 ### Looked at and found sound
 
@@ -923,34 +923,3 @@ hold together under the reconnect and renewal paths as read. Every native import
 System32. The workflows use least-privilege permissions, SHA-pinned actions and build attestation,
 and CI publishes the way the release does. No user secret is in the tree: the client id and API key
 in `SonyOAuth` are the Sony app's public identifiers and are allow-listed in `.gitleaks.toml`.
-
-## 13. TV follow: soundbar stays off when the TV turns on (merged, not yet device-tested)
-
-The reporter's QN90B switches the HT-A9000 off over HDMI-CEC but not back on: at boot the TV falls
-back to its own speakers and only wakes the soundbar when Sound Output is set to it by hand. TV-side
-and soundbar-side settings (Anynet+, eARC mode, Quick Start/Network Standby, a CEC reset by
-unplugging both) did not fix it, per the reporter.
-
-- Design: `Core/Tv/SamsungTvProbe` reads `device.PowerState` from `http://<tv>:8001/api/v2/`
-  (unauthenticated on Tizen sets). Only an explicit "on" counts: a set in standby keeps answering
-  with "standby", and after some hours with an empty string, which other integrations misread as on
-  (homebridge-samsung-tizen issue 702). `Core/Tv/TvPowerFollower` polls every 2 s, needs two matching
-  readings to confirm a change, and acts only on a confirmed off-to-on change: starting with the TV
-  on, one odd reading, or the user switching the soundbar off while the TV stays on does nothing.
-  It then sends `power` on through the new `BraviaEngine.SetPowerAsync(true)` (idempotent, unlike
-  the toggle), retrying once a second for 30 s while the engine is not connected (PC resume).
-- Settings: `TvHost` (empty = off), Connection tab, "TV" card. `App.ApplyTvFollow` starts, restarts
-  on a host change, and stops it at shutdown; it reads whichever engine is current, so engine
-  replacement does not touch it.
-- Only runs while the app runs: with the PC off or asleep the TV still turns on alone.
-- Tests: `TvPowerFollowerTests` (parsing, edge-only waking, debounce, wait-for-connection,
-  give-up log, engine sends `power` only when it differs). Built and run on 2026-11-14 in the Linux
-  container (section 5): 24 of 24, eight runs, after fixing a race in
-  `EngineSetPowerSendsOnlyWhenTheStateDiffers` (it now waits for the first snapshot). CI run 68 on
-  the merged tree passed.
-- Merged into `claude/gifted-hopper-4e650w` on 2026-11-14 (`b3d3812`), section renumbered from 11.
-- Next: on the reporter's PC, set the TV's IP, set `LogLevel` to Info, turn the TV off and on, and
-  check the log for "TV follow: the TV turned on, so the soundbar was turned on." Also confirm the
-  TV then routes sound to the soundbar by itself (the reporter says turning the soundbar on by hand
-  does). Alternative signal if the TV's endpoint proves unreliable: the PC's own display change
-  (section 10: 1280x720 with the TV off, 4K with it on).
