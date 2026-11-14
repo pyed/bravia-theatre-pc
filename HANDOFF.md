@@ -3,7 +3,7 @@
 Living record of work on this repository. Read it first; update it as you go (see
 [CLAUDE.md](CLAUDE.md#keep-handoffmd-current)). Times are the reporter's local time.
 
-Last updated: 2026-11-06
+Last updated: 2026-11-14
 
 ## Status
 
@@ -28,6 +28,9 @@ Last updated: 2026-11-06
 | v2.3.3 release | Published 2026-10-16 (00:59 UTC) with all five assets; both executables passed the startup check; CI on `main` green |
 | v2.3.2 release | Published 2026-10-14 16:46 (13:46 UTC) with all five assets; both executables passed the release run's startup check; CI on `main` green |
 | v2.3.4 release | Published 2026-11-06 02:26 (2026-11-05 23:26 UTC) with all five assets on the run's second attempt; both executables passed the startup check; CI on `main` green (section 11) |
+| Second full audit (source, release pipeline, repository) | Done 2026-11-14 on v2.3.4 by reading; nothing was built or run (section 12) |
+| Self-contained download bundles .NET runtime 10.0.10 | Open, P4-7: five security releases behind; SDK pin cannot reach a current runtime (section 12) |
+| `feature/tv-follow` (turn the soundbar on with a Samsung TV) | Unmerged branch from v2.3.3; CI passed on it; needs a device test (P4-11, section 12) |
 
 Released as **v2.3.2** on 2026-10-14: the framework-dependent download starts again (it never had
 since ReadyToRun was enabled), CI restores and publishes exactly as the release does, and both
@@ -763,3 +766,96 @@ it replaced (SHA-256 `4CFEB17F...8AB86687`) is kept as `BraviaTheatrePC.exe.2.3.
 Checked: running from `Documents\bin`, connected to the soundbar on port 55051, 43 MB private
 bytes, nothing logged since the start. The flyout drew tinted, blurred acrylic with its edge on its
 first open and on a reopen after hiding behind the tray menu.
+
+## 12. Second full audit (2026-11-14, on v2.3.4, `7dde80f`)
+
+### Scope and limits
+
+Read in full: every file under `src/` (Core, UI, XAML). Surveyed, not read line by line: the tests.
+Also checked: both workflows, the Dependabot and gitleaks configuration, the policy documents, the
+packages' current versions on nuget.org, .NET's release metadata (dotnet/core,
+`release-notes/10.0/releases.json` and the per-release notes), and the repository's pull requests,
+branches, issues and workflow runs through the GitHub API.
+
+**Nothing was built or run.** The audit ran in a Linux container with no .NET SDK, and its network
+policy blocks the SDK download host. So there is no build, test run, analyzer sweep or coverage
+figure behind this section (section 4 had all four), and UI behaviour is inferred from the code.
+Each row says how it was checked. IDs continue section 4's numbering.
+
+No new defect of section 4's P1 kind was found. The item to take first is P4-7, then P4-8 (it only
+needs merging), then P2-12 to P2-14; most other rows are under an hour each.
+
+### P2: reliability and user experience
+
+| ID | Finding | Evidence | Proposed fix | Effort |
+| --- | --- | --- | --- | --- |
+| P2-12 | The subnet probe runs on whatever network the PC is on. In every discovery round that mDNS does not answer, it opens TCP connections to port 55051 on up to 512 addresses per interface, 24 at a time, and a round repeats every 11 to 66 s for as long as no soundbar is found. On a laptop at an office, a hotel or a café, or over a VPN adapter that reports as Ethernet with a gateway, that is a recurring port sweep of someone else's network. In an outage like section 9's (about ten days) it runs the whole time, unless a static host is set. | `MdnsDiscovery.GetActiveIPv4Interfaces` (eligible: up, not loopback or tunnel, private or 100.64/10 address, IPv4 gateway), `DelayedSubnetProbeAsync`, and the backoff in `BraviaEngine.WorkerLoopCoreAsync` (5 s doubling to 60 s, plus the 6 s round). Read, not run. | Probe only a network the soundbar has been seen on: remember the subnet or gateway of the last successful handshake, and elsewhere use mDNS and the last known address only. Lengthen the pause between sweeps after repeated misses. | M |
+| P2-13 | Where unused addresses do not answer, a round reaches only about the 120 addresses nearest the PC's own, and every round starts from the same place. A soundbar further away in the range is never found by the probe, however long the app retries. | A probe times out after 1.2 s, 24 run at once, and the round ends 5.1 s after probing starts. A simulation of that schedule (not the real code): from .10 in a /24 it covers .1 to .121; from .128, .68 to .188. It matters only when mDNS fails (multicast filtered by an access point, for instance), which is the case the probe exists for. | Continue each round where the last one stopped, or give the sweep its own time budget. Add a test with a fake probe that times out. | S-M |
+| P2-14 | One rejected or failed command ends the connection: Disconnected state, a 5 s backoff, a new handshake. The soundbar rejects a path the model lacks with `InvalidArgument`, so moving the rear-level slider without rear speakers, or choosing an input the model does not have, drops the connection each time. `ParseExecResponse` also treats a success reply with any extra field as a rejection. | `BraviaEngine.CommandDrainCoreAsync` returns on a false result or an exception. `RejectedCommandTearsDownConnectionAndClearsOptimisticState` pins that as intended; `WireCodecTests` pins `08 01 10 01` as rejected. | Keep the connection: read the snapshot again to replace the optimistic state, and reconnect only if that fails. Accept a reply whose field 1 is true whatever follows it. | S-M |
+| P2-15 | A `settings.json` that fails to parse is replaced with defaults during the same start. The warning is shown, defaults are used, and `ShowTrayIconGuidanceOnce` saves them at once, because the defaults have `TrayIconGuidanceShown` false. Shortcuts, static host and log level are lost and no copy is kept. | `AppSettings.Load`, `App.OnStartup`, `App.ShowTrayIconGuidanceOnce`. Read, not run. | Rename the unreadable file (for example `settings.json.bad`) before the first save, and name it in the warning. | S |
+| P2-16 | The sign-in dialog cannot try again in automatic mode. After a failed code exchange (network or Sony error) or a cancelled device choice, the authorization code is spent and nothing reloads the sign-in page, so the dialog has to be closed and reopened. On first run, closing it exits the app. | `AuthDialog.ProcessAuthCallbackAsync` only resets its flags; `AuthWebView.Source` is set once, in `InitializeAutoLoginAsync`. What the page shows after the cancelled redirect was not observed. | On failure, start a new login (`StartOAuthLogin`) and navigate the view to it. | S |
+| P2-17 | If Windows refuses the tray icon when the app starts, it is never added: only an Explorer restart (`TaskbarCreated`) triggers another attempt. `Shell_NotifyIcon(NIM_ADD)` can time out while Explorer is busy at sign-in, which is when an autostarted app calls it. The app then runs with no icon; starting it again shows the flyout but still no icon. | `NativeTrayIcon.Show`, `Add`, `UpdateIcon`. Not reproduced. | Retry the add on a timer, as `BeginExplorerRecovery` already does after an Explorer restart. | S |
+| P2-18 | Saving Settings with both a new host or port and a shortcut that Windows refuses reports nothing and leaves no shortcut registered. That path replaces the engine, which registers hotkeys with `showUserError: false` on a new service that has no previous bindings to restore. | `App.OpenSettingsWindow` (the `connectionChanged` branch), `App.ReplaceEngine`. Read, not run. | Report the failure on this path too. | S |
+| P2-19 | The sign-in dialog's button reads "Switch to manual mode (F12)", but nothing handles F12. | No `KeyBinding`, `InputBindings` or `Key.F12` anywhere in `src/`. | Add the key handler or drop the hint, and use one spelling of the caption (XAML and code differ in capitals). | S |
+| P2-20 | While Sony's cloud keeps failing a renewal for expired credentials, the app asks again on every reconnect attempt, every 11 to 66 s, with no limit of its own. A token exchange that succeeds while the session-key call fails also rotates and rewrites the refresh token each time. | The preflight renewal in `WorkerLoopCoreAsync`; `SonyCredentialLifecycle.RefreshAsync` reuses an earlier result only for `AuthenticationRequired`. Read, not run. | Give failed renewals their own, longer backoff, independent of the connection's. | S |
+| P2-21 | Moving the executable leaves the old Run entry behind. Settings then shows "Start with Windows" unchecked, while the old copy, if it still exists, keeps starting at sign-in. | `AutoStartService.IsAutoStartEnabled` compares the registered path with the running one. | Show the mismatch, or repoint the entry at startup when it names a file that is gone. | S |
+
+### P3: maintainability and tests
+
+| ID | Finding | Proposed fix | Effort |
+| --- | --- | --- | --- |
+| P3-9 | An `ObjectDisposedException` or `OperationCanceledException` that reaches the dispatcher is dropped without a log line (`App.OnStartup`), so a real use-after-dispose on the UI thread leaves no trace. | Log it at Info before marking it handled. | S |
+| P3-10 | Snapshots and notifications decode an entry's value with two separate functions that disagree (`StatesCodec.ParseStateEntry`, `NotifyParser.ExtractValue`): the field precedence differs, and a string in field 2 is read correctly from a snapshot but from a notification comes out as the raw bytes, tag and length included, or as a hex string. P3-7 unified the path-to-field map above them, not these. No capture shows the device sending a string in field 2. | One shared value decoder; extend P3-7's parity test to it. | S-M |
+| P3-11 | Credential expiry is checked against the wall clock (`BraviaEngine.IsNearingExpiry` uses `DateTimeOffset.UtcNow`) while the rest of the engine takes a `TimeProvider`, so expiry tests depend on real time. | Use `_timeProvider.GetUtcNow()`. | S |
+
+### P4: release, security, and project
+
+| ID | Finding | Evidence | Proposed fix | Effort |
+| --- | --- | --- | --- | --- |
+| P4-7 | **The self-contained download ships a .NET runtime that is five security releases old.** `global.json` and both workflows pin SDK 10.0.302, which builds a self-contained app with runtime 10.0.10 (2026-07-14). v2.3.4 was released on 2026-11-05, after 10.0.11, 10.0.12, 10.0.13 and 10.0.14, all security releases; 10.0.15 followed on 2026-11-10. The 10.0.3xx band ended with 10.0.303 in August, so `latestPatch` cannot reach a current runtime; the current SDK is 10.0.404. The fixes in between include several rated remote code execution, one of them a memory corruption in `SocketAsyncEventArgs` (CVE-2026-70197), in the socket layer the app uses for discovery and the control connection. Which of them can be reached in this app was not assessed. The framework-dependent download is not affected: it runs on the installed runtime. Nothing flags the gap: CI's NuGet audit passes (run of 2026-11-13) because it does not cover the bundled runtime, and Dependabot does not watch the SDK. | dotnet/core `release-notes/10.0/releases.json` and release notes (SDK-to-runtime mapping, dates, CVE lists); publish dates of `Microsoft.NETCore.App.Runtime.win-x64` on nuget.org; section 8 ("SDK 10.0.302 builds against 10.0.10"). The released exe was not opened to read its runtime version. | Move `global.json` to 10.0.404. Have both workflows read it (`global-json-file: global.json`) instead of repeating the version. Add the `dotnet-sdk` ecosystem to `dependabot.yml`. Update CLAUDE.md, README and CONTRIBUTING, then release. CI's publish and startup checks cover section 8's ReadyToRun behaviour on the new SDK. | S |
+| P4-8 | Three Dependabot pull requests are open with green CI: #20 (Grpc.Net.Client and Grpc.Tools 2.85.0, WebView2 1.0.4314.35, Microsoft.NET.Test.Sdk 18.12.0, xunit.v3.mtp-off 4.0.3), #19 (softprops/action-gh-release 3.0.4) and #18 (actions/setup-dotnet 6.1.0, open since 2026-11-06). No NuGet update has been merged since #14 on 2026-10-14; #15, #16 and #17 were each superseded by the next week's. | GitHub API, 2026-11-14. #20's run included the pinning tests against the new WebView2. | Merge them. | S |
+| P4-9 | `SECURITY.md` names 2.2.x as the supported line and "2.1.x and older" as unsupported. The current release is 2.3.4. | `SECURITY.md`. | Say "the latest release", or update the table at each minor version. | S |
+| P4-10 | The app never checks that it is talking to the real soundbar. Replies carry a 32-byte auth token (`GetSessionRandomResponse.auth_token`, and the token in state replies) that the client parses and discards, so whatever answers the handshake is trusted for state. That host also receives the device-id hash, the key id and the key-confirmation HMAC, which are the same for the life of the credentials (no nonce), so they could be replayed to the real soundbar's handshake; commands still need the key. This is the identity check P2-11 looked for in mDNS and did not find. | `BraviaClient.GetSingleStateAsync` (`var (newRandom, _, newSessionId)`), `ApplySessionRandomResponse`, `HandshakeAsync`. Whether the token is an HMAC under `hmac_key`, and over which bytes, is not known. | Work out the token's input from a one-off capture on the reporter's device, with the app stopped. If it verifies under `hmac_key`, reject replies that fail. | M |
+| P4-11 | `feature/tv-follow` (one commit, 2026-10-20: turn the soundbar on when a Samsung TV turns on) is unmerged, and `main`'s handoff does not mention it. It branched from v2.3.3, CI passed on it, and its own HANDOFF section says it still needs a test on the device. That section is numbered 11, like the acrylic section added to `main` since, so this file will conflict on merge. Four merged branches are still on the remote. | GitHub API and `git diff main...origin/feature/tv-follow`, 2026-11-14. | Test and merge it (renumbering its section), or close it. Delete the merged branches. | S |
+| P4-12 | A `v*` tag on any commit publishes a release. The workflow does not check that the commit is on `main` or that the tag matches `<Version>` in `Directory.Build.props`. The `release` environment's protection rules could not be read from here. | `release.yml`. | Fail early unless the tag's commit is an ancestor of `origin/main` and the tag equals `<Version>`. Give the `release` environment a required reviewer if it has none. | S |
+
+### Section 4 items that are still open, re-checked 2026-11-14
+
+- P4-2: `main` is still unprotected (the API reports `protected: false`) and there is no code-scanning
+  workflow. Dependabot security updates could not be read from here.
+- P4-1 (unsigned executables), P4-3 (third-party artwork under MIT), P4-6 (no update check, no way
+  to remove local data): unchanged.
+- P2-9 (does `ConfirmSignin` report success) and P2-11 (device identity): still waiting on device
+  evidence; P4-10 above is a second route to P2-11.
+- Section 7's open items 2 to 5 for the reporter: unchanged.
+
+### Smaller observations, not numbered
+
+- When a renewal on the open connection finds that sign-in is needed, the UI shows plain
+  "Disconnected" for one 5 s backoff before the sign-in prompt and notification: the keepalive's
+  `authRequired` is a local that the worker loop never sees (`RenewCredentialsInPlaceAsync`).
+- The rear-level slider has no drag guard like the volume slider's `_isDraggingSlider`, so a snapshot
+  that arrives mid-drag moves the thumb.
+- A second launch asks the running copy to show its flyout but does not pass on foreground rights
+  (`AllowSetForegroundWindow`), so the flyout may open unfocused and then not close by itself.
+  Unverified; section 7 checked only that it opens.
+- `SonyOAuth.IotUserAgent` carries a fixed BRAVIA Connect version (3.6.3) and install id, and the
+  authorize URL a fixed `country=US`. If Sony starts rejecting old app versions, sign-in and renewal
+  fail for every user at once.
+- gitleaks is held at 8.29.0 because of a regression in 8.30.1; check whether a fixed release exists.
+- The engine logs the soundbar's LAN address at Info ("Discovered soundbar at ..."), while failure
+  lines leave addresses out on purpose. Fine for a local log; worth knowing before asking a user for
+  an Info-level log.
+
+### Looked at and found sound
+
+The parsers stay bounded (protobuf fields and groups, mDNS names with a pointer-loop guard, TXT
+records). The credential lifecycle is serialized, checkpoints a rotated refresh token before using
+it, and keeps a sign-in-needed result until the credentials change. The DPAPI store replaces its file
+durably. OAuth uses PKCE, compares the state in constant time, parses the callback strictly, and its
+exceptions never carry response content. Logs record exception types, not messages, and the
+credential records override `ToString`. Engine generations, publish ordering and the notify gate
+hold together under the reconnect and renewal paths as read. Every native import resolves from
+System32. The workflows use least-privilege permissions, SHA-pinned actions and build attestation,
+and CI publishes the way the release does. No user secret is in the tree: the client id and API key
+in `SonyOAuth` are the Sony app's public identifiers and are allow-listed in `.gitleaks.toml`.
