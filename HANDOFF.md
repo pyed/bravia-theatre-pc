@@ -29,9 +29,10 @@ Last updated: 2026-11-14
 | v2.3.3 release | Published 2026-10-16 (00:59 UTC) with all five assets; both executables passed the startup check; CI on `main` green |
 | v2.3.2 release | Published 2026-10-14 16:46 (13:46 UTC) with all five assets; both executables passed the release run's startup check; CI on `main` green |
 | v2.3.4 release | Published 2026-11-06 02:26 (2026-11-05 23:26 UTC) with all five assets on the run's second attempt; both executables passed the startup check; CI on `main` green (section 11) |
-| Second full audit (source, release pipeline, repository) | Done 2026-11-14 on v2.3.4 by reading; nothing was built or run (section 12) |
-| Self-contained download bundles .NET runtime 10.0.10 | Open, P4-7: five security releases behind; SDK pin cannot reach a current runtime (section 12) |
-| `feature/tv-follow` (turn the soundbar on with a Samsung TV) | Unmerged branch from v2.3.3; CI passed on it; needs a device test (P4-11, section 12) |
+| Second full audit (source, release pipeline, repository) | Done 2026-11-14 on v2.3.4 by reading (section 12) |
+| Fixes for the second audit's findings | On branch `claude/gifted-hopper-4e650w` (2026-11-14), not merged or released; everything except P4-10, and two settings for the owner. CI run 68 green: 597 of 597 tests on Windows (section 12, "Fixes") |
+| Self-contained download bundles .NET runtime 10.0.10 (P4-7) | Fixed on the branch: SDK 10.0.404, runtime 10.0.15; reaches users only with the next release |
+| `feature/tv-follow` (turn the soundbar on with a Samsung TV) | Merged into the branch; a device test is still owed (section 13) |
 
 Released as **v2.3.2** on 2026-10-14: the framework-dependent download starts again (it never had
 since ReadyToRun was enabled), CI restores and publishes exactly as the release does, and both
@@ -301,8 +302,21 @@ tests, CI with pinned action SHAs, gitleaks, Dependabot version updates, and a c
 ## 5. Working notes
 
 - **Toolchain.** The reporter's PC had only the .NET 10.0.12 runtime. SDK 10.0.302 was installed
-  system-wide with `winget install --id Microsoft.DotNet.SDK.10 --version 10.0.302 --exact`;
-  winget's newest, 10.0.402, would not satisfy `global.json`.
+  system-wide with `winget install --id Microsoft.DotNet.SDK.10 --version 10.0.302 --exact`.
+  `global.json` now pins 10.0.404 (section 12, P4-7), so building there next time needs
+  `winget install --id Microsoft.DotNet.SDK.10 --version 10.0.404 --exact` (or any later 10.0.4xx).
+- **Working from a Linux cloud container** (2026-11-14). The SDK download host is blocked there, but
+  Ubuntu's archive has `dotnet-sdk-10.0` (10.0.1xx). With a copy of the tree that leaves out
+  `global.json`, and `EnableWindowsTargeting=true` set in the environment (MSBuild reads it as a
+  property, and `dotnet format` takes no `-p`), restore, `dotnet format --verify-no-changes` and the
+  `-warnaserror` Release build all run, XAML included. WPF tests cannot run on Linux, but a scratch
+  `net10.0` test project named `BraviaTheatre.Tests` (so Core's `InternalsVisibleTo` applies) that
+  links the test files without WPF or UI references runs the Core tests: 391 of them on 2026-11-14.
+  Extract the copy with fresh timestamps (`tar -m`): with the repository's old mtimes MSBuild reuses
+  a stale Core build. PowerShell for testing workflow scripts: `dotnet tool install --tool-path
+  <dir> PowerShell --version 7.6.0` (7.7.0 needs a newer runtime). `claude/**` branches do not run
+  CI on push; start it with `workflow_dispatch` on the branch. Dependabot's branches show whole-file
+  diffs against the CRLF tree; compare with `git diff --ignore-cr-at-eol`.
 - **The reporter's install.** The standalone exe runs from `%USERPROFILE%\Documents\bin\`. It is
   not registered in `HKCU\...\Run` (it was started from Explorer), even though `settings.json` says
   `StartWithWindows: true`; see the finding in section 4. Backups in that folder follow the pattern
@@ -848,6 +862,55 @@ needs merging), then P2-12 to P2-14; most other rows are under an hour each.
   lines leave addresses out on purpose. Fine for a local log; worth knowing before asking a user for
   an Info-level log.
 
+### Fixes, 2026-11-14 (branch `claude/gifted-hopper-4e650w`, not merged or released)
+
+At the reporter's request every finding above was fixed on the branch, except P4-10 and two settings
+only the owner can change. Commits: `b8acc7f` (SDK and dependencies), `7d32dd0` (discovery and
+engine), `5c1e6f5` (UI), `b3d3812` (merge of `feature/tv-follow`), `575e080` (release guard, policy).
+
+How it was checked, overall: in the Linux container (section 5) `dotnet format` is clean, the
+Release build with `-warnaserror` has no warnings, and the 391 Core tests pass, five runs in a row.
+For every engine and discovery fix, reverting it in a scratch copy made its new test fail (15
+mutations, all caught). CI on the branch (`workflow_dispatch`, runs 67 and 68): SDK 10.0.404
+restore, format, build with 0 warnings, 597 of 597 tests on Windows, NuGet audit clean, both
+publishes containing only the executable, both executables still running after 20 s, gitleaks clean.
+Not exercised on a real desktop or against the soundbar: everything below marked "compile only".
+
+| ID | What changed | Verified |
+| --- | --- | --- |
+| P4-7 | `global.json` pins SDK 10.0.404 (runtime 10.0.15). Both workflows install the SDK from it (`global-json-file`) and Dependabot watches it (`dotnet-sdk`). CLAUDE.md, README, CONTRIBUTING updated. | CI installed 10.0.404 and runtime 10.0.15 from `global.json`; `WorkflowsInstallTheSdkThatGlobalJsonPinsAndDependabotWatchesIt`. The released exe gets the new runtime only with the next release. |
+| P4-8 | The three Dependabot updates applied on the branch instead of merged on GitHub (the branch rule forbids writing to `main`). The PRs should close by themselves once `main` has the versions. | CI green with Grpc 2.85.0, WebView2 1.0.4314.35 (pinning tests included), Test.Sdk 18.12.0, xunit 4.0.3, setup-dotnet 6.1.0, action-gh-release 3.0.4 (not exercised: it runs only on release). |
+| P2-12 | `SubnetProbePlan` (Core/Discovery): once the soundbar is found, the subnet probe sweeps only its network, kept in `settings.json` as `SoundbarNetwork` and updated when it is found elsewhere. With none known, any private network may be swept, as before. After a full pass without a soundbar sweeping pauses: 5 minutes, doubling to 30, measured on the monotonic clock. mDNS is unchanged. Moving the soundbar to a new network where mDNS fails now needs a static host (README). | `SubnetProbePlanTests`, `ConnectingToADiscoveredSoundbarRemembersItsNetworkForLaterSweeps`. The App's saving of the network: compile only. |
+| P2-13 | Each sweep continues where the last stopped: `ProbeCandidatesAsync` reports the first probe that did not finish, and the plan rotates the list. | `EachSweepContinuesWhereTheLastOneStopped`, `ASweepThatRunsOutOfTimeReportsTheFirstProbeThatDidNotFinish`. |
+| P2-14 | A rejected or failed command reads the state again (optimistic changes are replaced) and keeps the connection; only a failed or empty read reconnects. `InvalidArgument` is logged at Info as a rejection. `ParseExecResponse` accepts field 1 true with other fields. | `RejectedCommandKeepsTheConnectionAndRestoresTheDeviceState` (false result and `InvalidArgument`), `FailedCommandWhoseStateCannotBeReadAgainReconnects`, `TestExecResponseParsing`. Replaces `RejectedCommandTearsDownConnectionAndClearsOptimisticState`, which pinned the old behaviour. |
+| P2-15 | An unreadable `settings.json` is moved to `settings.json.bad`, named in the warning, before defaults are used. | `AppSettingsTests` (CI). |
+| P2-16 | After a failed or cancelled exchange, automatic sign-in starts a new login (new PKCE pair and state) in the same view. Manual mode is unchanged: opening the browser again yields a new code. | Compile only; not run against Sony's page. |
+| P2-17 | If the tray icon cannot be added at start, it is retried every 2 s for five minutes; failures in a retry series are logged once. | Compile only. |
+| P2-18 | Saving a new host or port reports a shortcut Windows refuses. | Compile only. |
+| P2-19 | F12 toggles manual mode (window `PreviewKeyDown`); one caption style. Inside the web view F12 reaches WPF only if WebView2 forwards it as an accelerator key, which is expected but not checked. | Compile only. |
+| P2-20 | A transient or failed renewal starts its own backoff: 1 minute, doubling to 15, on the monotonic clock. The preflight, reactive and keepalive renewals all wait for it. A new sign-in starts fresh; Sony's rotated-token checkpoint does not. | `FailedRenewalWaitsForAGrowingBackoffInsteadOfEveryReconnect` (with a token rotated on every attempt), `NewCredentialsAreNotHeldBackByTheOldOnesRenewalBackoff`. `FailedPreflightAndImmediateConnectionFailureUseGrowingBackoff` now expects 1 renewal, not 3; the checkpoint-recovery test advances a clock past the backoff. |
+| P2-21 | A Run entry naming a vanished executable is repointed at this copy at start (not from a temp folder). Settings shows an entry that starts another existing copy, and saving writes the entry only when the box changed (it used to delete the other copy's entry); a failed settings save restores the exact previous command. | `TheRunEntryIsClassifiedAgainstTheRunningCopy` (CI). Registry writes: compile only. |
+| P3-9 | Cancellations and disposals reaching the dispatcher are logged at Info. | Compile only. |
+| P3-10 | `StateValueCodec` (Core/Wire) decodes values for both parsers with the snapshot's rules (field 4, then 2, 3, 5). Notifications no longer turn a string nested in field 2 into raw bytes or hex. | `SnapshotAndNotificationDecodeAnEntryValueTheSameWay` (11 cases). |
+| P3-11 | Credential expiry uses the engine's `TimeProvider`. | `NearExpiryIsJudgedByTheEnginesClock`. |
+| P4-9 | `SECURITY.md` supports the latest release instead of naming a version line. | Read. |
+| P4-10 | **Open.** Needs a one-off capture on the reporter's device (app stopped) to learn what the reply token signs. Reading the reference implementation was not possible: adding `steamEngineer/pybravia-connect` to the session was declined. | |
+| P4-11 | `feature/tv-follow` merged (`b3d3812`), its section renumbered to 13. Its `EngineSetPowerSendsOnlyWhenTheStateDiffers` raced the first snapshot and failed on every isolated run here; it now waits for the snapshot. **Still open:** the device test in section 13, and deleting the four merged remote branches (`claude/practical-mayer-b95xzo`, `codex/recover-stale-sony-association`, `fix/ci-hardening`, `perf/lightweight-publish`) and `feature/tv-follow` once the branch is merged. That writes to other branches, so it was left to the owner. | Core tests 24 of 24, eight runs; CI run 68. |
+| P4-12 | `release.yml` checks out full history and fails before building unless the tag's commit is on `main` and the tag equals `<Version>` (a prerelease tag may preview it). **Still open:** a required reviewer on the `release` environment, a repository setting. | Tested with PowerShell 7.6 against a scratch remote (on main and matching passes; off main, or a mismatched version, fails); `ReleaseOnlyPublishesACommitOnMainAtItsDeclaredVersion`. Not run as a real release. |
+
+Smaller observations: the sign-in prompt is now published with the disconnect
+(`KeepaliveRenewalNeedingSignIn_AsksForItBeforeTheReconnectBackoff`); the rear-level slider ignores
+snapshots during a drag (`RearSliderIgnoresSnapshotsDuringADragAndFollowsAfterIt`, CI); a second
+launch calls `AllowSetForegroundWindow(ASFW_ANY)` before signalling the running copy (compile
+only). Unchanged: the fixed BRAVIA Connect user agent, and the LAN address at Info. gitleaks: no
+release after 8.30.1 was found (web search, 2026-11-14; the GitHub API for that repository is outside
+this session), so the 8.29.0 pin stays. An advisory says versions before 8.30.1 have a
+template-injection flaw; whether CI's use is affected was not checked.
+
+Next steps: review and merge the branch (or open a PR from it), release, then on the reporter's PC
+look for "Remembered the soundbar's network" at Info after the first connect, and run the TV follow
+test from section 13.
+
 ### Looked at and found sound
 
 The parsers stay bounded (protobuf fields and groups, mDNS names with a pointer-loop guard, TXT
@@ -881,8 +944,11 @@ unplugging both) did not fix it, per the reporter.
   replacement does not touch it.
 - Only runs while the app runs: with the PC off or asleep the TV still turns on alone.
 - Tests: `TvPowerFollowerTests` (parsing, edge-only waking, debounce, wait-for-connection,
-  give-up log, engine sends `power` only when it differs). Not built or run locally (the session
-  could not reach NuGet); CI on the branch is the build and test check.
+  give-up log, engine sends `power` only when it differs). Built and run on 2026-11-14 in the Linux
+  container (section 5): 24 of 24, eight runs, after fixing a race in
+  `EngineSetPowerSendsOnlyWhenTheStateDiffers` (it now waits for the first snapshot). CI run 68 on
+  the merged tree passed.
+- Merged into `claude/gifted-hopper-4e650w` on 2026-11-14 (`b3d3812`), section renumbered from 11.
 - Next: on the reporter's PC, set the TV's IP, set `LogLevel` to Info, turn the TV off and on, and
   check the log for "TV follow: the TV turned on, so the soundbar was turned on." Also confirm the
   TV then routes sound to the soundbar by itself (the reporter says turning the soundbar on by hand

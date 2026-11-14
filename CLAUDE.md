@@ -30,11 +30,14 @@ after that the app talks to the soundbar directly over cleartext HTTP/2 gRPC on 
 ```text
 src/BraviaTheatre.Core/      no UI dependencies
   Auth/       SonyOAuth (cloud calls), SonyCredentialLifecycle (serialized renewal), SonyCredentials
-  Discovery/  MdnsDiscovery: mDNS, then a bounded subnet probe that fingerprints the gRPC service
+  Discovery/  MdnsDiscovery: mDNS, then a bounded subnet probe that fingerprints the gRPC service;
+              SubnetProbePlan: probe only the soundbar's remembered network, resume, pause after misses
   DiagnosticLevel.cs  the level every log call states
   Engine/     BraviaClient (gRPC + session handshake), BraviaEngine (connection loop, state, commands),
               NotifyStreamGate (notify stream across session renewals), ControlEndpoint (static host)
-  Wire/       bounded protobuf codecs for Sony's hand-framed messages, HMAC signing
+  Wire/       bounded protobuf codecs for Sony's hand-framed messages, HMAC signing;
+              StateValueCodec decodes state values for snapshots and notifications alike
+  Tv/         TV follow: SamsungTvProbe, TvPowerFollower (turn the soundbar on with the TV)
   Models/     SoundbarState, CodecTaxonomy, control ranges
 src/BraviaTheatre.UI/        WPF app; assembly and exe name BraviaTheatrePC
   App.xaml.cs  startup, single instance, logging, unhandled-error handling, engine lifetime
@@ -68,10 +71,12 @@ dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x6
 dotnet publish src/BraviaTheatre.UI/BraviaTheatre.UI.csproj -c Release -r win-x64 --no-self-contained -p:PublishSingleFile=true -p:DebugType=none -o publish/framework-dependent
 ```
 
-CI (`.github/workflows/ci.yml`) also runs gitleaks and a NuGet vulnerability audit that parses
+CI runs on pushes to `main`, `feature/**`, `fix/**` and `codex/**`; start it on other branches
+(`claude/**`) with `workflow_dispatch`. CI (`.github/workflows/ci.yml`) also runs gitleaks and a NuGet vulnerability audit that parses
 `dotnet package list --vulnerable --format json` and fails on any finding.
-A `v*` tag runs `release.yml`, which derives the version from the tag. Bump `<Version>` in
-`Directory.Build.props` when preparing a release.
+A `v*` tag runs `release.yml`, which derives the version from the tag and refuses a tag whose commit
+is not on `main` or whose version differs from `<Version>` in `Directory.Build.props`. Bump
+`<Version>` when preparing a release, and push `main` before the tag.
 
 ## Conventions
 
@@ -142,8 +147,9 @@ A `v*` tag runs `release.yml`, which derives the version from the tag. Bump `<Ve
   a channel does not dispose a handler it was given, and every reconnect creates a new client.
 - **Device protocol quirks.** The soundbar answers `InvalidArgument` both for a path it does not
   support and for a rejected session, so one rejected path means nothing while every path rejected
-  means the session is gone. It ends a local session about an hour after the handshake, so the
-  engine repeats the handshake on the open connection every `DeviceSessionRenewalInterval`
+  means the session is gone. A rejected command therefore re-reads the state and keeps the
+  connection; only a failed or empty read reconnects. The soundbar ends a local session about an
+  hour after the handshake, so the engine repeats the handshake on the open connection every `DeviceSessionRenewalInterval`
   (50 minutes), and once more whenever a keepalive comes back empty. `NotifyStreamGate` closes the
   notification stream for the renewal and reopens it on the new session. Any failure there falls
   back to a full reconnect. The daily local-credential renewal works the same way: the keepalive
