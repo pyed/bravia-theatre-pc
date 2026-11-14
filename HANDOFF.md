@@ -20,6 +20,7 @@ Last updated: 2026-11-14
 | Daily credential renewal on the open connection (P1-5) | Verified on the device: every renewal in the logs since 2026-10-27 completed in place (section 7) |
 | Flyout three times too wide after a display scale change; tray menu dead after Alt+F4 | Fixed in v2.3.3 (section 10) |
 | Flyout fully transparent, no edge, after days of sleep and resume | Fixed in v2.3.4 (`01f7463`), which runs on the reporter's PC (section 11) |
+| Soundbar stays off when the Samsung TV turns on | TV follow merged from `feature/tv-follow` on 2026-11-14; needs a device test (section 13) |
 | v2.2.8 release | Published 2026-10-13 22:56 UTC with all five assets; CI on `main` green |
 | Full audit with prioritized fix proposal | Done 2026-10-14 (section 4) |
 | Overnight work, 2026-10-14 | Released in v2.3.0; open checks in section 7 |
@@ -859,3 +860,31 @@ hold together under the reconnect and renewal paths as read. Every native import
 System32. The workflows use least-privilege permissions, SHA-pinned actions and build attestation,
 and CI publishes the way the release does. No user secret is in the tree: the client id and API key
 in `SonyOAuth` are the Sony app's public identifiers and are allow-listed in `.gitleaks.toml`.
+
+## 13. TV follow: soundbar stays off when the TV turns on (merged, not yet device-tested)
+
+The reporter's QN90B switches the HT-A9000 off over HDMI-CEC but not back on: at boot the TV falls
+back to its own speakers and only wakes the soundbar when Sound Output is set to it by hand. TV-side
+and soundbar-side settings (Anynet+, eARC mode, Quick Start/Network Standby, a CEC reset by
+unplugging both) did not fix it, per the reporter.
+
+- Design: `Core/Tv/SamsungTvProbe` reads `device.PowerState` from `http://<tv>:8001/api/v2/`
+  (unauthenticated on Tizen sets). Only an explicit "on" counts: a set in standby keeps answering
+  with "standby", and after some hours with an empty string, which other integrations misread as on
+  (homebridge-samsung-tizen issue 702). `Core/Tv/TvPowerFollower` polls every 2 s, needs two matching
+  readings to confirm a change, and acts only on a confirmed off-to-on change: starting with the TV
+  on, one odd reading, or the user switching the soundbar off while the TV stays on does nothing.
+  It then sends `power` on through the new `BraviaEngine.SetPowerAsync(true)` (idempotent, unlike
+  the toggle), retrying once a second for 30 s while the engine is not connected (PC resume).
+- Settings: `TvHost` (empty = off), Connection tab, "TV" card. `App.ApplyTvFollow` starts, restarts
+  on a host change, and stops it at shutdown; it reads whichever engine is current, so engine
+  replacement does not touch it.
+- Only runs while the app runs: with the PC off or asleep the TV still turns on alone.
+- Tests: `TvPowerFollowerTests` (parsing, edge-only waking, debounce, wait-for-connection,
+  give-up log, engine sends `power` only when it differs). Not built or run locally (the session
+  could not reach NuGet); CI on the branch is the build and test check.
+- Next: on the reporter's PC, set the TV's IP, set `LogLevel` to Info, turn the TV off and on, and
+  check the log for "TV follow: the TV turned on, so the soundbar was turned on." Also confirm the
+  TV then routes sound to the soundbar by itself (the reporter says turning the soundbar on by hand
+  does). Alternative signal if the TV's endpoint proves unreliable: the PC's own display change
+  (section 10: 1280x720 with the TV off, 4K with it on).

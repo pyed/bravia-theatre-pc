@@ -8,6 +8,7 @@ using BraviaTheatre.Core.Auth;
 using BraviaTheatre.Core.Discovery;
 using BraviaTheatre.Core.Engine;
 using BraviaTheatre.Core.Models;
+using BraviaTheatre.Core.Tv;
 using BraviaTheatre.UI.Models;
 using BraviaTheatre.UI.Services;
 using BraviaTheatre.UI.Views;
@@ -35,6 +36,8 @@ public partial class App : Application
     private AuthDialog? _authDialog;
     private DeviceSelectionDialog? _deviceSelectionDialog;
     private CancellationTokenSource? _deviceRecoveryCts;
+    private CancellationTokenSource? _tvFollowCts;
+    private string _tvFollowHost = "";
     private bool _soundbarPickerDismissed;
     private bool _isShuttingDown;
     private bool _startupCompleted;
@@ -261,6 +264,7 @@ public partial class App : Application
         // Initialize System Tray
         var trayIconShown = InitializeTray();
         ReplaceEngine();
+        ApplyTvFollow();
         _startupCompleted = true;
         if (trayIconShown)
             Dispatcher.BeginInvoke(new Action(ShowTrayIconGuidanceOnce));
@@ -404,6 +408,8 @@ public partial class App : Application
                 _flyout?.ApplySettings(_settings);
                 ApplyHotkeySettings(showUserError: true);
             }
+
+            ApplyTvFollow();
         };
 
         win.ShowDialog();
@@ -578,6 +584,56 @@ public partial class App : Application
             else
                 Log(error ?? "Could not save the soundbar's network.", DiagnosticLevel.Info);
         });
+    }
+
+    // TV follow outlives engine replacements: it reads whichever engine is current when the TV
+    // turns on, so a reconnect or a new sign-in does not need to restart it.
+    private void ApplyTvFollow()
+    {
+        var host = _settings.TvHost?.Trim() ?? "";
+        if (!string.IsNullOrEmpty(host) && !ControlEndpoint.TryNormalizeHost(host, out host))
+        {
+            Log("TV follow: the saved TV host is not valid; TV follow is off.", DiagnosticLevel.Critical);
+            host = "";
+        }
+
+        if (_tvFollowCts != null && string.Equals(host, _tvFollowHost, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        StopTvFollow();
+        if (host.Length == 0 || _isShuttingDown) return;
+
+        var cts = new CancellationTokenSource();
+        var probe = new SamsungTvProbe(host);
+        var follower = new TvPowerFollower(
+            probe.ReadAsync,
+            () =>
+            {
+                var state = Volatile.Read(ref _engine)?.CurrentState;
+                return state is { Connected: true } ? state.Power : null;
+            },
+            () => Volatile.Read(ref _engine)?.SetPowerAsync(true) ?? Task.FromResult(false),
+            log: Log);
+
+        _tvFollowCts = cts;
+        _tvFollowHost = host;
+        Log("TV follow started.", DiagnosticLevel.Info);
+        _ = Task.Run(() => follower.RunAsync(cts.Token)).ContinueWith(task =>
+        {
+            probe.Dispose();
+            if (task.Exception != null)
+                Log($"TV follow stopped: {task.Exception.InnerException?.GetType().Name}", DiagnosticLevel.Critical);
+        }, TaskScheduler.Default);
+    }
+
+    private void StopTvFollow()
+    {
+        var cts = _tvFollowCts;
+        _tvFollowCts = null;
+        _tvFollowHost = "";
+        if (cts == null) return;
+        try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        cts.Dispose();
     }
 
     private long InvalidateEngineState(BraviaEngine? engine)
@@ -766,6 +822,7 @@ public partial class App : Application
         _isShuttingDown = true;
 
         CancelDeviceRecovery();
+        try { StopTvFollow(); } catch { }
         try { _authDialog?.Close(); } catch { }
         try { _settingsWindow?.Close(); } catch { }
         try { _trayMenu?.CloseForShutdown(); } catch { }

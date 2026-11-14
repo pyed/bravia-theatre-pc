@@ -50,6 +50,7 @@ public partial class SettingsWindow : Window
         TxtHotkeyNightMode.Text = _settings.HotkeyNightMode;
         TxtStaticHost.Text = _settings.StaticHost ?? "";
         TxtStaticPort.Text = _settings.StaticPort.ToString();
+        TxtTvHost.Text = _settings.TvHost ?? "";
 
         // Logging Level
         foreach (ComboBoxItem item in CboLogLevel.Items)
@@ -160,6 +161,16 @@ public partial class SettingsWindow : Window
             return;
         }
 
+        var tvHost = TxtTvHost.Text.Trim();
+        if (tvHost.Length > 0 && !ControlEndpoint.TryNormalizeHost(tvHost, out tvHost))
+        {
+            MessageBox.Show(this,
+                "Enter only the TV's IP address or host name, for example 192.168.1.40, without http:// or a port. Leave it empty to turn this off.",
+                "Invalid Settings", MessageBoxButton.OK, MessageBoxImage.Warning);
+            TxtTvHost.Focus();
+            return;
+        }
+
         // Only a change touches the Run entry. Saving with the box unchanged used to delete an entry
         // that started another copy of the app, because the box shows only this copy's state.
         var startWithWindows = ChkStartWithWindows.IsChecked ?? false;
@@ -186,6 +197,7 @@ public partial class SettingsWindow : Window
         updated.HotkeyNightMode = TxtHotkeyNightMode.Text.Trim();
         updated.StaticHost = staticHost;
         updated.StaticPort = port;
+        updated.TvHost = tvHost;
 
         if (CboLogLevel.SelectedItem is ComboBoxItem selectedItem && selectedItem.Tag != null)
         {
