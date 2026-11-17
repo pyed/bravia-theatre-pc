@@ -920,8 +920,12 @@ framework-dependent asset, SHA-256 matching the published `.sha256`, `gh attesta
 after the start: product version 2.3.5, connected on port 55051, 41 MB private bytes, nothing logged
 since the start, and `settings.json` now holds `SoundbarNetwork` (P2-12 saving works; the Info line
 was not seen because the log level is Critical). Not checked: the UI fixes marked compile only.
-The framework-dependent build runs on the installed Desktop Runtime, 10.0.12 on that PC, so P4-7's
-runtime fixes reach it only when the runtime is updated (10.0.15).
+The framework-dependent build runs on the installed Desktop Runtime, so P4-7's runtime fixes need
+that updated too: at the owner's request the Desktop Runtime went from 10.0.12 to 10.0.15 the same
+morning (`winget upgrade Microsoft.DotNet.DesktopRuntime.10`, installer hash verified by winget),
+and the app was restarted at 08:17. Checked: its `coreclr.dll` and `wpfgfx_cor3.dll` load from the
+10.0.15 folders, it connected on port 55051, 41 MB private bytes, nothing logged since the start.
+The SDK there is still 10.0.302, so building locally needs 10.0.404 installed first.
 
 ### Looked at and found sound
 
