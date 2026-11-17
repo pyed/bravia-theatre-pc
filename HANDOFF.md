@@ -915,7 +915,7 @@ template-injection flaw; whether CI's use is affected was not checked.
 
 Merged and released as v2.3.5 (2026-11-17), and installed on the reporter's PC at 08:13: the
 framework-dependent asset, SHA-256 matching the published `.sha256`, `gh attestation verify` naming
-`release.yml` at `refs/tags/v2.3.5`, copied over `Documentsin\BraviaTheatrePC.exe` and started with
+`release.yml` at `refs/tags/v2.3.5`, copied over `Documents\bin\BraviaTheatrePC.exe` and started with
 `explorer.exe`. The v2.3.4 exe it replaced is kept as `BraviaTheatrePC.exe.2.3.4.bak`. Checked 30 s
 after the start: product version 2.3.5, connected on port 55051, 41 MB private bytes, nothing logged
 since the start, and `settings.json` now holds `SoundbarNetwork` (P2-12 saving works; the Info line
