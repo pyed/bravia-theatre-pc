@@ -28,6 +28,7 @@ Last updated: 2026-11-17
 | v2.3.3 release | Published 2026-10-16 (00:59 UTC) with all five assets; both executables passed the startup check; CI on `main` green |
 | v2.3.2 release | Published 2026-10-14 16:46 (13:46 UTC) with all five assets; both executables passed the release run's startup check; CI on `main` green |
 | v2.3.4 release | Published 2026-11-06 02:26 (2026-11-05 23:26 UTC) with all five assets on the run's second attempt; both executables passed the startup check; CI on `main` green (section 11) |
+| v2.3.5 release | Published 2026-11-17 05:05 UTC with all five assets: the second audit's fixes, squashed onto `main` as `67b4e01`, version bump `bf6439d`. CI on `main` green (573 of 573 tests, 0 warnings); the Release run's new guard passed ("Releasing 2.3.5 from main"), tests passed, both executables passed the startup check. Not yet installed on the reporter's PC (section 12) |
 | Second full audit (source, release pipeline, repository) | Done 2026-11-14 on v2.3.4 by reading (section 12) |
 | Fixes for the second audit's findings | Squash-merged into `main` from branch `claude/gifted-hopper-4e650w` on 2026-11-17, released as v2.3.5; everything except P4-10, and two settings for the owner. CI run 71 on the final tree green: 573 of 573 tests on Windows (section 12, "Fixes") |
 | Self-contained download bundles .NET runtime 10.0.10 (P4-7) | Fixed in v2.3.5: SDK 10.0.404, runtime 10.0.15 |
@@ -901,7 +902,7 @@ Not exercised on a real desktop or against the soundbar: everything below marked
 | P4-9 | `SECURITY.md` supports the latest release instead of naming a version line. | Read. |
 | P4-10 | **Open.** Needs a one-off capture on the reporter's device (app stopped) to learn what the reply token signs. Reading the reference implementation was not possible: adding `steamEngineer/pybravia-connect` to the session was declined. | |
 | P4-11 | **Not merged, by the owner's decision (2026-11-14): no TV-specific features in this project.** The branch had been merged here (`b3d3812`) on the audit's "test and merge it, or close it" without the owner asking; the merge is reverted (`c441bd7`), and CLAUDE.md now records the scope. Closing `feature/tv-follow`, and deleting the four merged remote branches (`claude/practical-mayer-b95xzo`, `codex/recover-stale-sony-association`, `fix/ci-hardening`, `perf/lightweight-publish`), is left to the owner: it writes to other branches. | The revert leaves the code exactly as before the merge plus `575e080` (`git diff` against a tree rebuilt without the merge is empty). |
-| P4-12 | `release.yml` checks out full history and fails before building unless the tag's commit is on `main` and the tag equals `<Version>` (a prerelease tag may preview it). **Still open:** a required reviewer on the `release` environment, a repository setting. | Tested with PowerShell 7.6 against a scratch remote (on main and matching passes; off main, or a mismatched version, fails); `ReleaseOnlyPublishesACommitOnMainAtItsDeclaredVersion`. Not run as a real release. |
+| P4-12 | `release.yml` checks out full history and fails before building unless the tag's commit is on `main` and the tag equals `<Version>` (a prerelease tag may preview it). **Still open:** a required reviewer on the `release` environment, a repository setting. | Tested with PowerShell 7.6 against a scratch remote (on main and matching passes; off main, or a mismatched version, fails); `ReleaseOnlyPublishesACommitOnMainAtItsDeclaredVersion`. Passed in the real v2.3.5 Release run (the accepting path only). |
 
 Smaller observations: the sign-in prompt is now published with the disconnect
 (`KeepaliveRenewalNeedingSignIn_AsksForItBeforeTheReconnectBackoff`); the rear-level slider ignores
@@ -912,7 +913,7 @@ release after 8.30.1 was found (web search, 2026-11-14; the GitHub API for that 
 this session), so the 8.29.0 pin stays. An advisory says versions before 8.30.1 have a
 template-injection flaw; whether CI's use is affected was not checked.
 
-Next steps: review and merge the branch (or open a PR from it), release, then on the reporter's PC
+Merged and released as v2.3.5 (2026-11-17). Next steps: install it on the reporter's PC, then
 look for "Remembered the soundbar's network" at Info after the first connect.
 
 ### Looked at and found sound
