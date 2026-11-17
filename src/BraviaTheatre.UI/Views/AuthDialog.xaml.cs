@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Input;
 using BraviaTheatre.Core;
 using BraviaTheatre.Core.Auth;
 using BraviaTheatre.UI.Services;
@@ -23,6 +24,10 @@ public partial class AuthDialog : Window
     private string? _webViewSessionDirectory;
     private CoreWebView2Environment? _webViewEnvironment;
     private readonly List<Window> _popups = new();
+
+    private const string LoadingSignInText = "Loading Sony sign-in…";
+    private const string ToManualModeText = "Switch to manual mode (F12)";
+    private const string ToAutomaticModeText = "Switch back to automatic sign-in (F12)";
 
     public AuthDialog(SonyCredentialLifecycle credentialLifecycle)
     {
@@ -54,7 +59,7 @@ public partial class AuthDialog : Window
         try
         {
             OverlayProgress.Visibility = Visibility.Visible;
-            TxtProgressStatus.Text = "Loading Sony Sign-In...";
+            TxtProgressStatus.Text = LoadingSignInText;
 
             _webViewSessionDirectory = WebViewProfileService.PrepareSessionDirectory(App.GetAppDataDir());
             var env = await CoreWebView2Environment.CreateAsync(userDataFolder: _webViewSessionDirectory);
@@ -138,9 +143,11 @@ public partial class AuthDialog : Window
         }
         catch (OperationCanceledException)
         {
+            // The soundbar choice was cancelled.
             _isProcessing = false;
             OverlayProgress.Visibility = Visibility.Collapsed;
             BtnManualComplete.IsEnabled = true;
+            RestartAutomaticSignIn();
         }
         catch (Exception ex)
         {
@@ -152,7 +159,32 @@ public partial class AuthDialog : Window
                 ? ex.Message
                 : "Sony sign-in could not be completed. Please try again.";
             MessageBox.Show($"Authentication and key exchange failed:\n\n{detail}", "Authentication Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            RestartAutomaticSignIn();
         }
+    }
+
+    // The authorization code of a failed or cancelled exchange is spent, and the view still shows
+    // the page that redirected, so automatic sign-in could only be retried by closing and reopening
+    // the dialog (on first run, closing it exits the app). Manual mode needs nothing: opening the
+    // browser again yields a new code for the same login.
+    private void RestartAutomaticSignIn()
+    {
+        if (_isClosed || _isManualMode || AuthWebView.CoreWebView2 is not { } view) return;
+
+        var (authUrl, codeVerifier, state) = SonyOAuth.StartOAuthLogin();
+        _authUrl = authUrl;
+        _codeVerifier = codeVerifier;
+        _expectedState = state;
+        TxtProgressStatus.Text = LoadingSignInText;
+        OverlayProgress.Visibility = Visibility.Visible;
+        view.Navigate(authUrl);
+    }
+
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.F12) return;
+        e.Handled = true;
+        BtnToggleMode_Click(sender, e);
     }
 
     private void BtnOpenBrowser_Click(object sender, RoutedEventArgs e)
@@ -199,7 +231,7 @@ public partial class AuthDialog : Window
         PanelAutoMode.Visibility = Visibility.Collapsed;
         PanelManualMode.Visibility = Visibility.Visible;
         BtnManualComplete.Visibility = Visibility.Visible;
-        BtnToggleMode.Content = "Switch back to Automatic Sign-In";
+        BtnToggleMode.Content = ToAutomaticModeText;
         TxtSubtitle.Text = "Manual mode: Open login in browser and paste the authorization callback URL";
     }
 
@@ -209,7 +241,7 @@ public partial class AuthDialog : Window
         PanelManualMode.Visibility = Visibility.Collapsed;
         PanelAutoMode.Visibility = Visibility.Visible;
         BtnManualComplete.Visibility = Visibility.Collapsed;
-        BtnToggleMode.Content = "Switch to Manual Mode (F12)";
+        BtnToggleMode.Content = ToManualModeText;
         TxtSubtitle.Text = "Sign in with your Sony account to connect your BRAVIA Theatre system";
     }
 

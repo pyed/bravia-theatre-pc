@@ -2,12 +2,9 @@
 
 ## Supported versions
 
-Security fixes are applied to the latest release line and `main`.
-
-| Version | Supported |
-| --- | --- |
-| 2.2.x | Yes |
-| 2.1.x and older | No |
+Security fixes are applied to `main` and published in the next release. Only the latest release
+is supported; update to it before reporting an issue. The self-contained build bundles the .NET
+runtime, so its runtime security fixes also arrive only with a new release.
 
 ## Reporting a vulnerability
 

@@ -15,6 +15,7 @@ public partial class SettingsWindow : Window
 {
     private readonly AppSettings _settings;
     private readonly Action _onReAuth;
+    private readonly bool _startsThisCopy;
 
     public event Action<AppSettings>? SettingsSaved;
 
@@ -30,7 +31,14 @@ public partial class SettingsWindow : Window
             ? "BRAVIA Theatre PC"
             : $"BRAVIA Theatre PC v{ver.Major}.{ver.Minor}.{ver.Build}";
 
-        ChkStartWithWindows.IsChecked = AutoStartService.IsAutoStartEnabled();
+        var (runEntry, registeredPath) = AutoStartService.InspectRunEntry();
+        _startsThisCopy = runEntry == RunEntryState.ThisCopy;
+        ChkStartWithWindows.IsChecked = _startsThisCopy;
+        if (runEntry == RunEntryState.OtherCopy)
+        {
+            TxtAutoStartOtherCopy.Text = $"Windows starts another copy at sign-in: {registeredPath}. Turn this on to start this copy instead.";
+            TxtAutoStartOtherCopy.Visibility = Visibility.Visible;
+        }
         ChkShowRearSpeaker.IsChecked = _settings.ShowRearSpeaker;
         ChkEnableGlobalHotkeys.IsChecked = _settings.EnableGlobalHotkeys;
 
@@ -152,9 +160,12 @@ public partial class SettingsWindow : Window
             return;
         }
 
+        // Only a change touches the Run entry. Saving with the box unchanged used to delete an entry
+        // that started another copy of the app, because the box shows only this copy's state.
         var startWithWindows = ChkStartWithWindows.IsChecked ?? false;
-        if (startWithWindows
-            && !AutoStartService.IsAutoStartEnabled()
+        var startupChanged = startWithWindows != _startsThisCopy;
+        if (startupChanged
+            && startWithWindows
             && AutoStartService.IsTemporaryLocation(AutoStartService.GetExecutablePath(), Path.GetTempPath()))
         {
             MessageBox.Show(this,
@@ -189,8 +200,8 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        var previousAutoStart = AutoStartService.IsAutoStartEnabled();
-        if (!AutoStartService.TrySetAutoStart(startWithWindows, out var startupError))
+        var previousRunCommand = AutoStartService.ReadRunCommand();
+        if (startupChanged && !AutoStartService.TrySetAutoStart(startWithWindows, out var startupError))
         {
             MessageBox.Show(this, startupError, "Could Not Save Startup Setting",
                 MessageBoxButton.OK, MessageBoxImage.Error);
@@ -199,7 +210,7 @@ public partial class SettingsWindow : Window
 
         if (!updated.TrySave(out var saveError))
         {
-            AutoStartService.TrySetAutoStart(previousAutoStart, out _);
+            if (startupChanged) AutoStartService.TryWriteRunCommand(previousRunCommand, out _);
             MessageBox.Show(this, saveError, "Could Not Save Settings",
                 MessageBoxButton.OK, MessageBoxImage.Error);
             return;

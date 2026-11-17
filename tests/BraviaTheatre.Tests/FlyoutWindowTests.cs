@@ -117,6 +117,28 @@ public class FlyoutWindowTests(WpfApplicationFixture wpf)
         Assert.Equal(42, volumeSlider.Value);
     });
 
+    [Fact]
+    public void RearSliderIgnoresSnapshotsDuringADragAndFollowsAfterIt() => WithFlyout(flyout =>
+    {
+        var rearSlider = Find<Slider>(flyout, "SliderRear");
+        flyout.UpdateState(new SoundbarState { Connected = true, Power = true, RearLevel = 0 });
+        rearSlider.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
+        {
+            RoutedEvent = UIElement.PreviewMouseDownEvent
+        });
+
+        // A keepalive snapshot arriving mid-drag used to move the thumb under the pointer.
+        flyout.UpdateState(new SoundbarState { Connected = true, Power = true, RearLevel = 4 });
+        Assert.Equal(0, rearSlider.Value);
+
+        rearSlider.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0)
+        {
+            RoutedEvent = UIElement.LostMouseCaptureEvent
+        });
+        flyout.UpdateState(new SoundbarState { Connected = true, Power = true, RearLevel = 4 });
+        Assert.Equal(4, rearSlider.Value);
+    });
+
     private void WithFlyout(Action<FlyoutWindow> test) => wpf.Run(() =>
     {
         using var engine = new BraviaEngine(new SonyCredentials(), "test-host");

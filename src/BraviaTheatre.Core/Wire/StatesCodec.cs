@@ -7,8 +7,6 @@ namespace BraviaTheatre.Core.Wire;
 
 public static class StatesCodec
 {
-    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
-
     public static byte[] BuildSingleGetStatesRequest(
         string hmacKeyHex,
         string fieldPath,
@@ -177,50 +175,7 @@ public static class StatesCodec
             pos = nextPos;
         }
 
-        object? value = null;
-        if (fields.TryGetValue(4, out var f4) && f4.BytesValue is { Length: > 0 })
-        {
-            value = DecodeNestedString(f4.BytesValue);
-        }
-        else if (fields.TryGetValue(2, out var f2))
-        {
-            if (f2.WireType == 0)
-            {
-                value = DecodeSignedInteger(f2.VarintValue);
-            }
-            else if (f2.BytesValue != null)
-            {
-                if (f2.BytesValue.Length == 0)
-                {
-                    value = 0;
-                }
-                else if (ProtobufWireCodec.TryDecodeField(f2.BytesValue, 0, out var sub, out _))
-                {
-                    if (sub?.WireType == 0)
-                        value = DecodeSignedInteger(sub.VarintValue);
-                    else if (sub is { FieldNumber: 1, WireType: 2, BytesValue: not null })
-                        value = DecodeUtf8(sub.BytesValue);
-                }
-            }
-        }
-        else if (fields.TryGetValue(3, out var f3) && f3.BytesValue != null)
-        {
-            if (f3.BytesValue.Length == 0)
-            {
-                value = false;
-            }
-            else if (ProtobufWireCodec.TryDecodeField(f3.BytesValue, 0, out var sub, out _)
-                && sub?.WireType == 0)
-            {
-                value = sub.VarintValue != 0;
-            }
-        }
-        else if (fields.TryGetValue(5, out var f5) && f5.BytesValue is { Length: > 0 })
-        {
-            value = DecodeNestedString(f5.BytesValue);
-        }
-
-        return (path, value);
+        return (path, StateValueCodec.Decode(fields));
     }
 
     private static void ExtractNestedSessionTokens(
@@ -254,22 +209,6 @@ public static class StatesCodec
         }
     }
 
-    private static object DecodeSignedInteger(ulong value)
-    {
-        var signed = unchecked((long)value);
-        if (signed is >= int.MinValue and <= int.MaxValue)
-            return (int)signed;
-        return signed;
-    }
-
-    private static string? DecodeNestedString(byte[] bytes)
-    {
-        return ProtobufWireCodec.TryDecodeField(bytes, 0, out var field, out _)
-            && field is { FieldNumber: 1, WireType: 2, BytesValue: not null }
-                ? DecodeUtf8(field.BytesValue)
-                : null;
-    }
-
     private static bool IsValidStatePath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path) || path.Length > 256)
@@ -284,15 +223,5 @@ public static class StatesCodec
         return true;
     }
 
-    private static string? DecodeUtf8(byte[] bytes)
-    {
-        try
-        {
-            return StrictUtf8.GetString(bytes);
-        }
-        catch (DecoderFallbackException)
-        {
-            return null;
-        }
-    }
+    private static string? DecodeUtf8(byte[] bytes) => StateValueCodec.DecodeUtf8(bytes);
 }

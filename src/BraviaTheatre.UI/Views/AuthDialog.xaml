@@ -18,7 +18,8 @@
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
-        Loaded="Window_Loaded">
+        Loaded="Window_Loaded"
+        PreviewKeyDown="Window_PreviewKeyDown">
 
     <Border Background="{DynamicResource LayerOnMicaBaseAltFillColorDefaultBrush}">
         <Grid Margin="24,20,24,20">

@@ -5,7 +5,7 @@ Thanks for helping improve BRAVIA Theatre PC. Keep changes focused, testable, an
 ## Development setup
 
 - Windows 10 or Windows 11
-- .NET SDK 10.0.302 or a compatible 10.0 patch selected by `global.json`
+- .NET SDK 10.0.404 or a later 10.0.4xx patch, as `global.json` selects
 - WebView2 Runtime for exercising the sign-in UI
 
 Restore, format, build, and test from the repository root:

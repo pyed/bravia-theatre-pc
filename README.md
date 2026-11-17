@@ -19,7 +19,7 @@ Built with C# and .NET 10, the application communicates directly with the device
 - Configurable global shortcuts, registered atomically so a conflicting shortcut cannot leave a partial hotkey setup.
 - Embedded Sony OAuth sign-in with PKCE and callback-state verification, a manual browser fallback, explicit device selection when an account contains multiple compatible devices, and a temporary browser profile that is removed after sign-in closes.
 - Windows user-scoped credential protection using DPAPI, including silent renewal of expiring local credentials when Sony provides renewable authorization, and recovery when Sony re-registers the soundbar under a new cloud association.
-- Automatic local discovery using mDNS first, followed by a bounded subnet probe that fingerprints candidates before connecting.
+- Automatic local discovery using mDNS first, followed by a bounded subnet probe that fingerprints candidates before connecting. Once the soundbar has been found, the probe runs only on that network (other networks get mDNS only), each sweep continues where the last one stopped, and sweeping pauses after a full pass without an answer, for up to 30 minutes.
 - Connection-scoped workers, health polling, command coalescing, stale-command rejection, and clean reconnect/teardown behavior.
 - Native Win32 tray integration with Explorer restart recovery, a supported Taskbar Settings shortcut and one-time visibility guidance, taskbar-aware multi-monitor placement, reduced-motion-aware slide animations, click-to-toggle behavior, and show-only single-instance activation.
 - Atomic settings storage, Windows startup integration, configurable logging, and optional static host/port override.
@@ -68,7 +68,7 @@ Keep the executable at a stable path so Windows can retain your tray-icon placem
 Requirements:
 
 - Windows 10 or Windows 11, 64-bit
-- [.NET SDK 10.0.302](https://dotnet.microsoft.com/download/dotnet/10.0) or a compatible patch selected by `global.json`
+- [.NET SDK 10.0.404](https://dotnet.microsoft.com/download/dotnet/10.0) or a later 10.0.4xx patch, as `global.json` selects
 - Microsoft Edge WebView2 Runtime for the embedded sign-in experience
 
 ```powershell
@@ -109,6 +109,8 @@ Settings are stored atomically under `%LOCALAPPDATA%\BraviaTheatrePC\settings.js
 - Global shortcuts
 - Automatic discovery or a static host/port override
 - Critical, Info, or Verbose logging
+
+The settings file also records the network the soundbar was last found on (`SoundbarNetwork`), which limits the subnet probe to that network; it updates itself when the soundbar is found elsewhere. If the soundbar moves to a new network where mDNS does not reach it, set a static host. A settings file that cannot be read is kept as `settings.json.bad` and the defaults are used.
 
 Only this current settings location is read. Daily logs are written to `%LOCALAPPDATA%\BraviaTheatrePC\Logs\BraviaTheatrePC-YYYY-MM-DD.log`; the most recent 14 days are retained.
 
