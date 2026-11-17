@@ -14,7 +14,7 @@ Last updated: 2026-11-17
 | gRPC connection pool leaked on every reconnect | Fixed in v2.2.8 |
 | Volume slider stops following the soundbar after an interrupted drag | Fixed in v2.2.8 |
 | Soundbar connection drops every hour | Fixed in v2.2.8; verified on the reporter's soundbar (section 3) |
-| Build on the reporter's PC | The v2.3.4 framework-dependent release asset (checksum and attestation verified) since 2026-11-06 02:29 (section 11) |
+| Build on the reporter's PC | The v2.3.5 framework-dependent release asset (checksum and attestation verified) since 2026-11-17 08:13 (section 12) |
 | Framework-dependent download never starts | Fixed in v2.3.2 (section 8) |
 | Soundbar unreachable since 2026-10-14 afternoon | Soundbar-side; reachable again by 2026-10-25, cause unknown (section 9) |
 | Daily credential renewal on the open connection (P1-5) | Verified on the device: every renewal in the logs since 2026-10-27 completed in place (section 7) |
@@ -28,7 +28,7 @@ Last updated: 2026-11-17
 | v2.3.3 release | Published 2026-10-16 (00:59 UTC) with all five assets; both executables passed the startup check; CI on `main` green |
 | v2.3.2 release | Published 2026-10-14 16:46 (13:46 UTC) with all five assets; both executables passed the release run's startup check; CI on `main` green |
 | v2.3.4 release | Published 2026-11-06 02:26 (2026-11-05 23:26 UTC) with all five assets on the run's second attempt; both executables passed the startup check; CI on `main` green (section 11) |
-| v2.3.5 release | Published 2026-11-17 05:05 UTC with all five assets: the second audit's fixes, squashed onto `main` as `67b4e01`, version bump `bf6439d`. CI on `main` green (573 of 573 tests, 0 warnings); the Release run's new guard passed ("Releasing 2.3.5 from main"), tests passed, both executables passed the startup check. Not yet installed on the reporter's PC (section 12) |
+| v2.3.5 release | Published 2026-11-17 05:05 UTC with all five assets: the second audit's fixes, squashed onto `main` as `67b4e01`, version bump `bf6439d`. CI on `main` green (573 of 573 tests, 0 warnings); the Release run's new guard passed ("Releasing 2.3.5 from main"), tests passed, both executables passed the startup check. Installed on the reporter's PC 2026-11-17 08:13 (section 12) |
 | Second full audit (source, release pipeline, repository) | Done 2026-11-14 on v2.3.4 by reading (section 12) |
 | Fixes for the second audit's findings | Squash-merged into `main` from branch `claude/gifted-hopper-4e650w` on 2026-11-17, released as v2.3.5; everything except P4-10, and two settings for the owner. CI run 71 on the final tree green: 573 of 573 tests on Windows (section 12, "Fixes") |
 | Self-contained download bundles .NET runtime 10.0.10 (P4-7) | Fixed in v2.3.5: SDK 10.0.404, runtime 10.0.15 |
@@ -913,8 +913,15 @@ release after 8.30.1 was found (web search, 2026-11-14; the GitHub API for that 
 this session), so the 8.29.0 pin stays. An advisory says versions before 8.30.1 have a
 template-injection flaw; whether CI's use is affected was not checked.
 
-Merged and released as v2.3.5 (2026-11-17). Next steps: install it on the reporter's PC, then
-look for "Remembered the soundbar's network" at Info after the first connect.
+Merged and released as v2.3.5 (2026-11-17), and installed on the reporter's PC at 08:13: the
+framework-dependent asset, SHA-256 matching the published `.sha256`, `gh attestation verify` naming
+`release.yml` at `refs/tags/v2.3.5`, copied over `Documentsin\BraviaTheatrePC.exe` and started with
+`explorer.exe`. The v2.3.4 exe it replaced is kept as `BraviaTheatrePC.exe.2.3.4.bak`. Checked 30 s
+after the start: product version 2.3.5, connected on port 55051, 41 MB private bytes, nothing logged
+since the start, and `settings.json` now holds `SoundbarNetwork` (P2-12 saving works; the Info line
+was not seen because the log level is Critical). Not checked: the UI fixes marked compile only.
+The framework-dependent build runs on the installed Desktop Runtime, 10.0.12 on that PC, so P4-7's
+runtime fixes reach it only when the runtime is updated (10.0.15).
 
 ### Looked at and found sound
 
